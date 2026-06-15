@@ -253,14 +253,18 @@ def compress_image(uploaded_image, quality=85):
 
 def compress_pdf(uploaded_pdf, quality='medium'):
     """
-    Compresses a PDF file with maximum compression by reducing image quality.
+    Compresses a PDF file with maximum compression by reducing image quality and size.
     """
     pdf_bytes = uploaded_pdf.read()
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     
-    # Set quality level
-    quality_dict = {'high': 80, 'medium': 60, 'low': 30}
-    jpeg_quality = quality_dict[quality]
+    # Set quality and scale level
+    settings = {
+        'high': {'quality': 80, 'scale': 1.0},
+        'medium': {'quality': 50, 'scale': 0.75},
+        'low': {'quality': 25, 'scale': 0.5}
+    }
+    config = settings[quality]
     
     for page_num in range(len(doc)):
         page = doc[page_num]
@@ -275,7 +279,7 @@ def compress_pdf(uploaded_pdf, quality='medium'):
                 # Extract the image
                 base_image = doc.extract_image(xref)
                 image_bytes = base_image["image"]
-                image_ext = base_image["ext"]
+                original_size = len(image_bytes)
                 
                 # Open with Pillow
                 img_pil = Image.open(io.BytesIO(image_bytes))
@@ -284,19 +288,30 @@ def compress_pdf(uploaded_pdf, quality='medium'):
                 if img_pil.mode in ('RGBA', 'P'):
                     img_pil = img_pil.convert('RGB')
                 
+                # Resize image if needed
+                if config['scale'] < 1.0:
+                    new_width = int(img_pil.width * config['scale'])
+                    new_height = int(img_pil.height * config['scale'])
+                    # Use compatible resampling method
+                    try:
+                        img_pil = img_pil.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                    except AttributeError:
+                        img_pil = img_pil.resize((new_width, new_height), Image.LANCZOS)
+                
                 # Compress the image
                 img_buffer = io.BytesIO()
-                img_pil.save(img_buffer, format='JPEG', quality=jpeg_quality, optimize=True)
-                img_buffer.seek(0)
+                img_pil.save(img_buffer, format='JPEG', quality=config['quality'], optimize=True)
+                compressed_img_bytes = img_buffer.getvalue()
                 
-                # Replace the old image in the PDF
-                page.replace_image(xref, stream=img_buffer.getvalue())
+                # Only replace if we actually reduced the size
+                if len(compressed_img_bytes) < original_size:
+                    page.replace_image(xref, stream=compressed_img_bytes)
             except:
                 continue  # Skip if there's an error with this image
     
     # Save the compressed PDF
     compressed_buffer = io.BytesIO()
-    doc.save(compressed_buffer, deflate=True, garbage=4)
+    doc.save(compressed_buffer, deflate=True, garbage=4, clean=True)
     compressed_buffer.seek(0)
     doc.close()
     
@@ -486,7 +501,7 @@ elif conversion_type == "🔽 Compress Image":
 elif conversion_type == "🔽 Compress PDF":
     st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.subheader("Compress PDF (Maximum Reduction!)")
-    st.markdown("Reduce PDF file size with professional compression using pikepdf.")
+    st.markdown("Reduce PDF file size by compressing images. Low quality = smallest file!")
     st.markdown("</div>", unsafe_allow_html=True)
     
     uploaded_pdf = st.file_uploader("Upload PDF File", type=["pdf"])
@@ -499,12 +514,9 @@ elif conversion_type == "🔽 Compress PDF":
                                   help="Low = Maximum compression (smallest file size)")
         
         if st.button("Compress PDF"):
-            with st.spinner("Compressing PDF with maximum optimization..."):
+            with st.spinner("Compressing PDF..."):
                 compressed_data = compress_pdf(uploaded_pdf, quality)
                 compressed_size = get_file_size(compressed_data)
-                
-                st.success(f"🎉 Compression Successful!")
-                st.info(f"📏 Compressed Size: {compressed_size}")
                 
                 # Calculate and show reduction percentage
                 uploaded_pdf.seek(0,2)
@@ -512,7 +524,14 @@ elif conversion_type == "🔽 Compress PDF":
                 compressed_data.seek(0,2)
                 compressed_size_bytes = compressed_data.tell()
                 reduction = ((original_size_bytes - compressed_size_bytes) / original_size_bytes) * 100
-                st.metric("Size Reduced By", f"{reduction:.1f}%")
+                
+                if reduction > 0:
+                    st.success(f"🎉 Compression Successful!")
+                    st.info(f"📏 Compressed Size: {compressed_size}")
+                    st.metric("Size Reduced By", f"{reduction:.1f}%")
+                else:
+                    st.warning("⚠️ Couldn't reduce file size much - PDF is already optimized!")
+                    st.info(f"📏 Compressed Size: {compressed_size} (same as original)")
                 
                 st.download_button(
                     label="📥 Download Compressed PDF",
@@ -527,3 +546,4 @@ st.markdown("""
     <p>Created with ❤️ for learners. DK File Converter © 2024</p>
 </div>
 """, unsafe_allow_html=True)
+
