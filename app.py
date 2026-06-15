@@ -23,7 +23,7 @@ st.markdown("""
 <style>
     /* Main background gradient */
     .stApp {
-        background: linear-gradient(135deg, #fef08a 0%, #1e293b 50%, #fef08a 100%);
+        background: linear-gradient(135deg, #0f172a 0%, #f1f5f9 50%, #0f172a 100%);
     }
     
     /* Main header style */
