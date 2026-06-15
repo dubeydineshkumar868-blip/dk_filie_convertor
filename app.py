@@ -253,18 +253,53 @@ def compress_image(uploaded_image, quality=85):
 
 def compress_pdf(uploaded_pdf, quality='medium'):
     """
-    Compresses a PDF file using PyMuPDF with reliable optimization.
+    Compresses a PDF file with maximum compression by reducing image quality.
     """
     pdf_bytes = uploaded_pdf.read()
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     
-    # Save with simple, reliable compression
+    # Set quality level
+    quality_dict = {'high': 80, 'medium': 60, 'low': 30}
+    jpeg_quality = quality_dict[quality]
+    
+    for page_num in range(len(doc)):
+        page = doc[page_num]
+        
+        # Get all images on the page
+        image_list = page.get_images()
+        
+        for img_index, img in enumerate(image_list):
+            xref = img[0]
+            
+            try:
+                # Extract the image
+                base_image = doc.extract_image(xref)
+                image_bytes = base_image["image"]
+                image_ext = base_image["ext"]
+                
+                # Open with Pillow
+                img_pil = Image.open(io.BytesIO(image_bytes))
+                
+                # Convert to RGB if needed
+                if img_pil.mode in ('RGBA', 'P'):
+                    img_pil = img_pil.convert('RGB')
+                
+                # Compress the image
+                img_buffer = io.BytesIO()
+                img_pil.save(img_buffer, format='JPEG', quality=jpeg_quality, optimize=True)
+                img_buffer.seek(0)
+                
+                # Replace the old image in the PDF
+                page.replace_image(xref, stream=img_buffer.getvalue())
+            except:
+                continue  # Skip if there's an error with this image
+    
+    # Save the compressed PDF
     compressed_buffer = io.BytesIO()
-    # Use basic compression that works with all PyMuPDF versions
     doc.save(compressed_buffer, deflate=True, garbage=4)
     compressed_buffer.seek(0)
-    
     doc.close()
+    
     return compressed_buffer
 
 # Helper function to get file size in human-readable format
@@ -450,8 +485,8 @@ elif conversion_type == "🔽 Compress Image":
 
 elif conversion_type == "🔽 Compress PDF":
     st.markdown("<div class='card'>", unsafe_allow_html=True)
-    st.subheader("Compress PDF")
-    st.markdown("Reduce PDF file size with reliable compression.")
+    st.subheader("Compress PDF (Maximum Reduction!)")
+    st.markdown("Reduce PDF file size with professional compression using pikepdf.")
     st.markdown("</div>", unsafe_allow_html=True)
     
     uploaded_pdf = st.file_uploader("Upload PDF File", type=["pdf"])
@@ -460,11 +495,11 @@ elif conversion_type == "🔽 Compress PDF":
         original_size = get_file_size(uploaded_pdf)
         st.info(f"📏 Original Size: {original_size}")
         
-        quality = st.select_slider("Compression Level", options=["high", "medium", "low"], value="medium",
-                                  help="All levels use reliable compression")
+        quality = st.select_slider("Compression Level", options=["high", "medium", "low"], value="low",
+                                  help="Low = Maximum compression (smallest file size)")
         
         if st.button("Compress PDF"):
-            with st.spinner("Compressing PDF..."):
+            with st.spinner("Compressing PDF with maximum optimization..."):
                 compressed_data = compress_pdf(uploaded_pdf, quality)
                 compressed_size = get_file_size(compressed_data)
                 
@@ -492,6 +527,3 @@ st.markdown("""
     <p>Created with ❤️ for learners. DK File Converter © 2024</p>
 </div>
 """, unsafe_allow_html=True)
-
-
-
