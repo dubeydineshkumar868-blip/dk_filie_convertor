@@ -75,6 +75,10 @@ st.markdown("""
         color: #6c757d;
         margin-top: 3rem;
     }
+    /* Slider styling */
+    .stSlider > div > div > div {
+        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -82,12 +86,12 @@ st.markdown("""
 st.markdown("""
 <div class="main-header">
     <h1>🔄 DK File Converter</h1>
-    <p style="margin-top: 0.5rem; font-size: 1.1rem;">Your all-in-one file conversion toolkit</p>
+    <p style="margin-top: 0.5rem; font-size: 1.1rem;">Your all-in-one file conversion & compression toolkit</p>
 </div>
 """, unsafe_allow_html=True)
 
 # Sidebar for navigation with icons
-st.sidebar.title("📋 Conversion Type")
+st.sidebar.title("📋 Tools")
 conversion_type = st.sidebar.selectbox(
     "Select what you want to do:",
     [
@@ -96,7 +100,9 @@ conversion_type = st.sidebar.selectbox(
         "📄 PDF to Image", 
         "📝 PDF to Word", 
         "📊 PDF to Excel",
-        "📎 Merge PDFs"
+        "📎 Merge PDFs",
+        "🔽 Compress Image",
+        "🔽 Compress PDF"
     ]
 )
 
@@ -229,6 +235,54 @@ def merge_pdfs(uploaded_pdfs):
     merged_buffer.seek(0)
     return merged_buffer
 
+def compress_image(uploaded_image, quality=85):
+    """
+    Compresses an image file with adjustable quality.
+    """
+    img = Image.open(uploaded_image)
+    
+    # Convert to RGB if it's RGBA or has palette
+    if img.mode in ('RGBA', 'P'):
+        img = img.convert('RGB')
+    
+    compressed_buffer = io.BytesIO()
+    img.save(compressed_buffer, format='JPEG', quality=quality, optimize=True)
+    compressed_buffer.seek(0)
+    
+    return compressed_buffer
+
+def compress_pdf(uploaded_pdf, quality='medium'):
+    """
+    Compresses a PDF file using PyMuPDF.
+    """
+    pdf_bytes = uploaded_pdf.read()
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    
+    # Define compression levels
+    garbage = 4
+    deflate = True
+    if quality == 'low':
+        garbage = 3
+    elif quality == 'high':
+        garbage = 2
+        deflate = False
+    
+    compressed_buffer = io.BytesIO()
+    doc.save(compressed_buffer, garbage=garbage, deflate=deflate)
+    compressed_buffer.seek(0)
+    
+    return compressed_buffer
+
+# Helper function to get file size in human-readable format
+def get_file_size(file_obj):
+    file_obj.seek(0, 2)  # Seek to end
+    size = file_obj.tell()
+    file_obj.seek(0)  # Reset to start
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if size < 1024.0:
+            return f"{size:.2f} {unit}"
+        size /= 1024.0
+
 # Main logic based on selection
 if conversion_type == "🖼️ Image to PDF":
     st.markdown("<div class='card'>", unsafe_allow_html=True)
@@ -277,7 +331,7 @@ elif conversion_type == "🖼️ Image to Word":
 elif conversion_type == "📄 PDF to Image":
     st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.subheader("Convert PDF to Images")
-    st.markdown("Extract each page of your PDF as a high-quality PNG image.")
+    st.markdown("Extract each page of your PDF as high-quality PNG images.")
     st.markdown("</div>", unsafe_allow_html=True)
     
     uploaded_pdf = st.file_uploader("Upload PDF File", type=["pdf"])
@@ -363,6 +417,72 @@ elif conversion_type == "📎 Merge PDFs":
                         file_name="merged_document.pdf",
                         mime="application/pdf"
                     )
+
+elif conversion_type == "🔽 Compress Image":
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.subheader("Compress Image")
+    st.markdown("Reduce image file size with adjustable quality.")
+    st.markdown("</div>", unsafe_allow_html=True)
+    
+    uploaded_image = st.file_uploader("Upload Image", type=["jpg", "jpeg", "png", "webp", "bmp"])
+    
+    if uploaded_image:
+        original_size = get_file_size(uploaded_image)
+        st.info(f"📏 Original Size: {original_size}")
+        
+        quality = st.slider("Compression Quality (1-100)", min_value=1, max_value=100, value=85, 
+                           help="Lower values = smaller file size but more compression artifacts")
+        
+        if st.button("Compress Image"):
+            with st.spinner("Compressing image..."):
+                compressed_data = compress_image(uploaded_image, quality)
+                compressed_size = get_file_size(compressed_data)
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.image(uploaded_image, caption="Original Image")
+                with col2:
+                    st.image(compressed_data, caption="Compressed Image")
+                
+                st.success(f"🎉 Compression Successful!")
+                st.info(f"📏 Compressed Size: {compressed_size}")
+                
+                st.download_button(
+                    label="📥 Download Compressed Image",
+                    data=compressed_data,
+                    file_name=f"compressed_{uploaded_image.name}",
+                    mime="image/jpeg"
+                )
+
+elif conversion_type == "🔽 Compress PDF":
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.subheader("Compress PDF")
+    st.markdown("Reduce PDF file size with adjustable compression levels.")
+    st.markdown("</div>", unsafe_allow_html=True)
+    
+    uploaded_pdf = st.file_uploader("Upload PDF File", type=["pdf"])
+    
+    if uploaded_pdf:
+        original_size = get_file_size(uploaded_pdf)
+        st.info(f"📏 Original Size: {original_size}")
+        
+        quality = st.select_slider("Compression Level", options=["high", "medium", "low"], value="medium",
+                                  help="High = Less compression, Low = More compression")
+        
+        if st.button("Compress PDF"):
+            with st.spinner("Compressing PDF..."):
+                compressed_data = compress_pdf(uploaded_pdf, quality)
+                compressed_size = get_file_size(compressed_data)
+                
+                st.success(f"🎉 Compression Successful!")
+                st.info(f"📏 Compressed Size: {compressed_size}")
+                
+                st.download_button(
+                    label="📥 Download Compressed PDF",
+                    data=compressed_data,
+                    file_name=f"compressed_{uploaded_pdf.name}",
+                    mime="application/pdf"
+                )
 
 # Footer
 st.markdown("""
