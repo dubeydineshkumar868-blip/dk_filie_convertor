@@ -253,22 +253,85 @@ def compress_image(uploaded_image, quality=85):
 
 def compress_pdf(uploaded_pdf, quality='medium'):
     """
-    Compresses a PDF file using PyMuPDF.
+    Compresses a PDF file using PyMuPDF with advanced optimization.
+    Includes image downsampling for maximum size reduction.
     """
     pdf_bytes = uploaded_pdf.read()
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     
-    # Define compression levels
-    garbage = 4
-    deflate = True
-    if quality == 'low':
-        garbage = 3
-    elif quality == 'high':
-        garbage = 2
-        deflate = False
+    # Define compression settings based on quality
+    settings = {
+        'high': {
+            'garbage': 2,
+            'deflate': True,
+            'image_dpi': 150,
+            'image_quality': 80
+        },
+        'medium': {
+            'garbage': 4,
+            'deflate': True,
+            'image_dpi': 100,
+            'image_quality': 60
+        },
+        'low': {
+            'garbage': 4,
+            'deflate': True,
+            'image_dpi': 72,
+            'image_quality': 40
+        }
+    }
     
+    config = settings[quality]
+    
+    # Process each page to optimize images
+    for page_num in range(len(doc)):
+        page = doc[page_num]
+        
+        # Get all images on the page
+        image_list = page.get_images()
+        
+        for img in image_list:
+            xref = img[0]
+            try:
+                # Get the image data
+                pix = fitz.Pixmap(doc, xref)
+                
+                # Skip small images
+                if pix.width < 100 and pix.height < 100:
+                    continue
+                
+                # Calculate new dimensions based on target DPI
+                scale = config['image_dpi'] / 300.0  # Assume original ~300 DPI
+                new_width = max(int(pix.width * scale), 100)
+                new_height = max(int(pix.height * scale), 100)
+                
+                # Only downsample if we're making it smaller
+                if new_width < pix.width or new_height < pix.height:
+                    # Convert to RGB if needed
+                    if pix.n >= 5:  # CMYK or other
+                        pix = fitz.Pixmap(fitz.csRGB, pix)
+                    
+                    # Create a new image with reduced size
+                    try:
+                        new_pix = fitz.Pixmap(fitz.csRGB, new_width, new_height)
+                        new_pix.shrink(pix)
+                        
+                        # Replace the old image
+                        page.replace_image(xref, pixmap=new_pix)
+                    except Exception:
+                        pass
+            except:
+                continue
+    
+    # Save with maximum optimization
     compressed_buffer = io.BytesIO()
-    doc.save(compressed_buffer, garbage=garbage, deflate=deflate)
+    doc.save(
+        compressed_buffer,
+        garbage=config['garbage'],
+        deflate=config['deflate'],
+        clean=True,
+        linear=True
+    )
     compressed_buffer.seek(0)
     
     return compressed_buffer
@@ -457,7 +520,7 @@ elif conversion_type == "🔽 Compress Image":
 elif conversion_type == "🔽 Compress PDF":
     st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.subheader("Compress PDF")
-    st.markdown("Reduce PDF file size with adjustable compression levels.")
+    st.markdown("Reduce PDF file size with advanced compression (downsamples large images).")
     st.markdown("</div>", unsafe_allow_html=True)
     
     uploaded_pdf = st.file_uploader("Upload PDF File", type=["pdf"])
@@ -467,15 +530,23 @@ elif conversion_type == "🔽 Compress PDF":
         st.info(f"📏 Original Size: {original_size}")
         
         quality = st.select_slider("Compression Level", options=["high", "medium", "low"], value="medium",
-                                  help="High = Less compression, Low = More compression")
+                                  help="High = Good quality, Low = Maximum compression (smallest size)")
         
         if st.button("Compress PDF"):
-            with st.spinner("Compressing PDF..."):
+            with st.spinner("Compressing PDF (this may take a moment for large files)..."):
                 compressed_data = compress_pdf(uploaded_pdf, quality)
                 compressed_size = get_file_size(compressed_data)
                 
                 st.success(f"🎉 Compression Successful!")
                 st.info(f"📏 Compressed Size: {compressed_size}")
+                
+                # Calculate and show reduction percentage
+                uploaded_pdf.seek(0,2)
+                original_size_bytes = uploaded_pdf.tell()
+                compressed_data.seek(0,2)
+                compressed_size_bytes = compressed_data.tell()
+                reduction = ((original_size_bytes - compressed_size_bytes) / original_size_bytes) * 100
+                st.metric("Size Reduced By", f"{reduction:.1f}%")
                 
                 st.download_button(
                     label="📥 Download Compressed PDF",
@@ -490,3 +561,4 @@ st.markdown("""
     <p>Created with ❤️ for learners. DK File Converter © 2024</p>
 </div>
 """, unsafe_allow_html=True)
+
