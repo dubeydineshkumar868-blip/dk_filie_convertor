@@ -21,63 +21,186 @@ st.set_page_config(
 # Custom CSS for attractive frontend
 st.markdown("""
 <style>
+    /* Main background gradient */
+    .stApp {
+        background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+    }
+    
     /* Main header style */
     .main-header {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 2rem;
-        border-radius: 15px;
+        background: linear-gradient(135deg, #8b5cf6 0%, #ec4899 50%, #f59e0b 100%);
+        padding: 3rem 2rem;
+        border-radius: 25px;
         color: white;
         text-align: center;
-        margin-bottom: 2rem;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        margin-bottom: 2.5rem;
+        box-shadow: 0 20px 60px rgba(139, 92, 246, 0.4);
+        animation: pulse 3s ease-in-out infinite;
     }
+    
+    @keyframes pulse {
+        0%, 100% { box-shadow: 0 20px 60px rgba(139, 92, 246, 0.4); }
+        50% { box-shadow: 0 20px 80px rgba(236, 72, 153, 0.5); }
+    }
+    
     .main-header h1 {
         color: white;
-        margin: 0;
+        margin: 0 0 0.5rem 0;
+        font-size: 2.8rem;
+        font-weight: 900;
+        text-shadow: 0 4px 15px rgba(0,0,0,0.3);
     }
+    
+    .main-header p {
+        font-size: 1.2rem;
+        opacity: 0.95;
+        margin: 0;
+        font-weight: 500;
+    }
+    
     /* Card style for sections */
     .card {
-        background: #f8f9fa;
-        padding: 1.5rem;
-        border-radius: 10px;
-        border-left: 5px solid #667eea;
+        background: linear-gradient(145deg, #1e293b 0%, #0f172a 100%);
+        padding: 2rem;
+        border-radius: 20px;
+        border-left: 6px solid #8b5cf6;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+    
+    .card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 15px 50px rgba(139, 92, 246, 0.3);
+    }
+    
+    .card h3 {
+        color: #a78bfa;
+        font-weight: 700;
+        font-size: 1.6rem;
         margin-bottom: 1rem;
     }
+    
+    .card p {
+        color: #cbd5e1;
+        font-size: 1.05rem;
+    }
+    
     /* Sidebar styling */
     [data-testid="stSidebar"] {
-        background-color: #f0f2f6;
+        background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+        border-right: 1px solid rgba(139, 92, 246, 0.2);
     }
+    
+    [data-testid="stSidebar"] h1 {
+        color: #8b5cf6;
+        font-weight: 800;
+    }
+    
+    [data-testid="stSidebar"] label {
+        color: #cbd5e1;
+    }
+    
     /* Button styling */
     .stButton>button {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        background: linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%);
         color: white;
-        border-radius: 8px;
+        border-radius: 50px;
         border: none;
-        padding: 0.5rem 2rem;
-        font-weight: bold;
+        padding: 0.8rem 3rem;
+        font-weight: 800;
+        font-size: 1.1rem;
         transition: all 0.3s ease;
+        box-shadow: 0 10px 30px rgba(139, 92, 246, 0.4);
+        text-transform: uppercase;
+        letter-spacing: 1px;
     }
+    
     .stButton>button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(102,126,234,0.4);
+        transform: translateY(-3px);
+        box-shadow: 0 15px 40px rgba(236, 72, 153, 0.5);
+        background: linear-gradient(135deg, #ec4899 0%, #8b5cf6 100%);
     }
+    
+    .stButton>button:active {
+        transform: translateY(-1px);
+    }
+    
     /* Success message */
     .stSuccess {
-        background-color: #d4edda;
-        color: #155724;
-        border-radius: 8px;
-        border: 1px solid #c3e6cb;
+        background: linear-gradient(135deg, #065f46 0%, #047857 100%);
+        color: #a7f3d0;
+        border-radius: 15px;
+        border: 1px solid #10b981;
+        box-shadow: 0 5px 20px rgba(16, 185, 129, 0.2);
     }
+    
+    /* Warning message */
+    .stWarning {
+        background: linear-gradient(135deg, #78350f 0%, #92400e 100%);
+        color: #fed7aa;
+        border-radius: 15px;
+        border: 1px solid #f59e0b;
+        box-shadow: 0 5px 20px rgba(245, 158, 11, 0.2);
+    }
+    
+    /* Info message */
+    .stInfo {
+        background: linear-gradient(135deg, #3730a3 0%, #4f46e5 100%);
+        color: #c7d2fe;
+        border-radius: 15px;
+        border: 1px solid #6366f1;
+        box-shadow: 0 5px 20px rgba(99, 102, 241, 0.2);
+    }
+    
+    /* File uploader styling */
+    [data-testid="stFileUploader"] {
+        background: rgba(139, 92, 246, 0.1);
+        border: 2px dashed #8b5cf6;
+        border-radius: 15px;
+        padding: 2rem;
+    }
+    
+    /* Slider styling */
+    .stSlider > div > div > div {
+        background: linear-gradient(90deg, #8b5cf6 0%, #ec4899 100%);
+    }
+    
     /* Footer */
     .footer {
         text-align: center;
-        padding: 2rem;
-        color: #6c757d;
+        padding: 3rem 2rem;
+        color: #64748b;
         margin-top: 3rem;
+        border-top: 1px solid rgba(139, 92, 246, 0.2);
     }
-    /* Slider styling */
-    .stSlider > div > div > div {
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+    
+    .footer p {
+        margin: 0;
+        font-size: 1rem;
+    }
+    
+    /* Input and text styling */
+    .stSelectbox label, .stSelectbox p {
+        color: #cbd5e1;
+    }
+    
+    .stMetric {
+        background: rgba(139, 92, 246, 0.15);
+        padding: 1.5rem;
+        border-radius: 15px;
+        border: 1px solid rgba(139, 92, 246, 0.3);
+    }
+    
+    .stMetric label {
+        color: #a78bfa;
+        font-weight: 700;
+    }
+    
+    .stMetric > div > div:nth-child(2) {
+        color: #10b981;
+        font-size: 2rem;
+        font-weight: 900;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -546,4 +669,3 @@ st.markdown("""
     <p>Created with ❤️ for learners. DK File Converter © 2024</p>
 </div>
 """, unsafe_allow_html=True)
-
