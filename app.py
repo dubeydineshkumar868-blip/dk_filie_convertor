@@ -253,38 +253,15 @@ def compress_image(uploaded_image, quality=85):
 
 def compress_pdf(uploaded_pdf, quality='medium'):
     """
-    Compresses a PDF file using PyMuPDF with advanced optimization.
+    Compresses a PDF file using PyMuPDF with reliable optimization.
     """
     pdf_bytes = uploaded_pdf.read()
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     
-    # Define compression settings based on quality
-    settings = {
-        'high': {
-            'garbage': 2,
-            'deflate': True,
-        },
-        'medium': {
-            'garbage': 4,
-            'deflate': True,
-        },
-        'low': {
-            'garbage': 4,
-            'deflate': True,
-        }
-    }
-    
-    config = settings[quality]
-    
-    # Save with maximum optimization
+    # Save with simple, reliable compression
     compressed_buffer = io.BytesIO()
-    doc.save(
-        compressed_buffer,
-        garbage=config['garbage'],
-        deflate=config['deflate'],
-        clean=True,
-        linear=True
-    )
+    # Use basic compression that works with all PyMuPDF versions
+    doc.save(compressed_buffer, deflate=True, garbage=4)
     compressed_buffer.seek(0)
     
     doc.close()
@@ -474,7 +451,7 @@ elif conversion_type == "🔽 Compress Image":
 elif conversion_type == "🔽 Compress PDF":
     st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.subheader("Compress PDF")
-    st.markdown("Reduce PDF file size with advanced compression (cleans up unused objects and optimizes for web).")
+    st.markdown("Reduce PDF file size with reliable compression.")
     st.markdown("</div>", unsafe_allow_html=True)
     
     uploaded_pdf = st.file_uploader("Upload PDF File", type=["pdf"])
@@ -484,7 +461,7 @@ elif conversion_type == "🔽 Compress PDF":
         st.info(f"📏 Original Size: {original_size}")
         
         quality = st.select_slider("Compression Level", options=["high", "medium", "low"], value="medium",
-                                  help="High = Less compression, Low = More aggressive compression")
+                                  help="All levels use reliable compression")
         
         if st.button("Compress PDF"):
             with st.spinner("Compressing PDF..."):
@@ -515,5 +492,6 @@ st.markdown("""
     <p>Created with ❤️ for learners. DK File Converter © 2024</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
