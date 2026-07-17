@@ -4,6 +4,7 @@ Your all-in-one file conversion toolkit built with Streamlit.
 
 ## ✨ Features
 
+- 🖼️ **Image Format Convert**: Convert images between PNG and JPG
 - 🖼️ **Image to PDF**: Combine multiple images into a single PDF file
 - 🖼️ **Image to Word**: Insert images into a well-formatted Word document
 - 📄 **PDF to Image**: Extract each page of a PDF as high-quality PNG images

@@ -218,6 +218,7 @@ st.sidebar.title("📋 Tools")
 conversion_type = st.sidebar.selectbox(
     "Select what you want to do:",
     [
+        "🖼️ Image Format Convert",
         "🖼️ Image to PDF",
         "🖼️ Image to Word",
         "📄 PDF to Image", 
@@ -267,6 +268,45 @@ def image_to_word(uploaded_files):
     doc.save(word_buffer)
     word_buffer.seek(0)
     return word_buffer.getvalue()
+
+def convert_image_format(uploaded_file, output_format):
+    """
+    Converts a single image into the requested output format.
+    """
+    uploaded_file.seek(0)
+    img = Image.open(uploaded_file)
+
+    if getattr(img, "is_animated", False):
+        img.seek(0)
+
+    converted_buffer = io.BytesIO()
+    target_format = output_format.upper()
+
+    if target_format == "JPG":
+        if img.mode in ("RGBA", "LA"):
+            background = Image.new("RGB", img.size, (255, 255, 255))
+            background.paste(img, mask=img.getchannel("A"))
+            img = background
+        elif img.mode in ("P", "CMYK"):
+            img = img.convert("RGB")
+        elif img.mode != "RGB":
+            img = img.convert("RGB")
+
+        img.save(converted_buffer, format="JPEG", quality=95, optimize=True)
+        mime_type = "image/jpeg"
+        file_extension = "jpg"
+    else:
+        if img.mode == "P":
+            img = img.convert("RGBA")
+        elif img.mode == "CMYK":
+            img = img.convert("RGB")
+
+        img.save(converted_buffer, format="PNG", optimize=True)
+        mime_type = "image/png"
+        file_extension = "png"
+
+    converted_buffer.seek(0)
+    return converted_buffer, mime_type, file_extension
 
 def pdf_to_images(uploaded_pdf):
     """
@@ -451,7 +491,42 @@ def get_file_size(file_obj):
         size /= 1024.0
 
 # Main logic based on selection
-if conversion_type == "🖼️ Image to PDF":
+if conversion_type == "🖼️ Image Format Convert":
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.subheader("Convert Image Format")
+    st.markdown("Convert uploaded images into PNG or JPG files for easy reuse.")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    uploaded_images = st.file_uploader(
+        "Upload Images",
+        type=["jpg", "jpeg", "png", "webp", "bmp", "tiff", "gif"],
+        accept_multiple_files=True
+    )
+    output_format = st.selectbox("Choose output format", ["PNG", "JPG"])
+
+    if uploaded_images:
+        st.info(f"✅ {len(uploaded_images)} image(s) selected.")
+        if st.button("Convert Images"):
+            with st.spinner(f"Converting images to {output_format}..."):
+                st.success("🎉 Conversion Successful!")
+                for uploaded_image in uploaded_images:
+                    converted_data, mime_type, file_extension = convert_image_format(
+                        uploaded_image,
+                        output_format
+                    )
+                    file_stem = os.path.splitext(uploaded_image.name)[0]
+                    st.image(
+                        converted_data,
+                        caption=f"{uploaded_image.name} → {file_extension.upper()}"
+                    )
+                    st.download_button(
+                        label=f"📥 Download {file_stem}.{file_extension}",
+                        data=converted_data,
+                        file_name=f"{file_stem}.{file_extension}",
+                        mime=mime_type
+                    )
+
+elif conversion_type == "🖼️ Image to PDF":
     st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.subheader("Convert Images to PDF")
     st.markdown("Combine multiple images into a single professional PDF file.")
