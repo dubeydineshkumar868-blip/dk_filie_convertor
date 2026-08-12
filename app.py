@@ -1,5 +1,12 @@
-import streamlit as st
 import os
+import sys
+import zipfile
+# Set UTF-8 encoding environment variables to fix UnicodeEncodeError
+os.environ['PYTHONIOENCODING'] = 'utf-8'
+os.environ['PYTHONUTF8'] = '1'
+# Set EasyOCR environment variable first to avoid home directory access
+os.environ['EASYOCR_MODULE_PATH'] = os.path.join(os.getcwd(), '.easyocr_models')
+import streamlit as st
 from PIL import Image
 import fitz  # PyMuPDF
 from pdf2docx import Converter
@@ -9,6 +16,7 @@ import pdfplumber
 import pandas as pd
 import io
 import tempfile
+import easyocr
 
 # Set page configuration with custom theme
 st.set_page_config(
@@ -23,7 +31,7 @@ st.markdown("""
 <style>
     /* Main background gradient */
     .stApp {
-        background: linear-gradient(135deg, #0f172a 0%, #f1f5f9 50%, #0f172a 100%);
+        background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
     }
     
     /* Main header style */
@@ -75,15 +83,18 @@ st.markdown("""
     }
     
     .card h3 {
-        color: #a78bfa;
-        font-weight: 700;
-        font-size: 1.6rem;
+        color: #ffffff;
+        font-weight: 800;
+        font-size: 1.7rem;
         margin-bottom: 1rem;
+        text-shadow: 0 2px 10px rgba(0,0,0,0.3);
     }
     
     .card p {
-        color: #cbd5e1;
-        font-size: 1.05rem;
+        color: #ffffff;
+        font-size: 1.15rem;
+        line-height: 1.6;
+        font-weight: 500;
     }
     
     /* Sidebar styling */
@@ -98,7 +109,32 @@ st.markdown("""
     }
     
     [data-testid="stSidebar"] label {
-        color: #cbd5e1;
+        color: #ffffff;
+        font-weight: 700;
+        font-size: 1rem;
+    }
+
+    /* Sidebar selectbox and dropdown styling */
+    [data-testid="stSidebar"] [data-baseweb="select"] span {
+        color: #ffffff !important;
+    }
+    
+    [data-testid="stSidebar"] [data-baseweb="select"] div {
+        color: #ffffff !important;
+    }
+
+    /* Selectbox dropdown options */
+    [data-testid="stSidebar"] [role="listbox"],
+    [data-testid="stSidebar"] [role="listbox"] div,
+    [data-testid="stSidebar"] [role="option"] {
+        color: #ffffff !important;
+        font-weight: 800 !important;
+        font-size: 1.1rem !important;
+        background-color: #1e293b !important;
+    }
+    
+    [data-testid="stSidebar"] [role="option"]:hover {
+        background-color: rgba(139, 92, 246, 0.5) !important;
     }
     
     /* Button styling */
@@ -155,15 +191,49 @@ st.markdown("""
     
     /* File uploader styling */
     [data-testid="stFileUploader"] {
-        background: rgba(139, 92, 246, 0.1);
-        border: 2px dashed #8b5cf6;
+        background: rgba(139, 92, 246, 0.15);
+        border: 2px dashed #a78bfa;
         border-radius: 15px;
         padding: 2rem;
+    }
+    
+    [data-testid="stFileUploader"] div {
+        color: #ffffff;
+    }
+    
+    /* All text elements */
+    .stMarkdown, .stText {
+        color: #ffffff;
+    }
+    
+    /* All labels */
+    label {
+        color: #ffffff !important;
+        font-weight: 600;
     }
     
     /* Slider styling */
     .stSlider > div > div > div {
         background: linear-gradient(90deg, #8b5cf6 0%, #ec4899 100%);
+    }
+    
+    /* Selectbox text */
+    [data-baseweb="select"] span {
+        color: #ffffff !important;
+    }
+    
+    [data-baseweb="select"] div {
+        color: #ffffff !important;
+    }
+    
+    /* All other text */
+    div, p, span {
+        color: #e2e8f0;
+    }
+    
+    /* Ensure headings are white */
+    h1, h2, h3, h4, h5, h6 {
+        color: #ffffff !important;
     }
     
     /* Footer */
@@ -182,7 +252,103 @@ st.markdown("""
     
     /* Input and text styling */
     .stSelectbox label, .stSelectbox p {
-        color: #cbd5e1;
+        color: #ffffff;
+    }
+    
+    /* Selectbox dropdown menu / popover / dialog */
+    [data-baseweb="popover"],
+    [data-baseweb="modal"],
+    [role="dialog"],
+    [role="listbox"] {
+        background: #1e293b !important;
+    }
+    
+    [data-baseweb="popover"] *:not(button):not(input):not(textarea),
+    [data-baseweb="modal"] *:not(button):not(input):not(textarea),
+    [role="dialog"] *:not(button):not(input):not(textarea),
+    [role="listbox"] *:not(button):not(input):not(textarea) {
+        color: #ffffff !important;
+        font-weight: 700 !important;
+    }
+    
+    [role="option"] {
+        color: #ffffff !important;
+        font-weight: 800 !important;
+        font-size: 1.05rem !important;
+        background-color: #1e293b !important;
+    }
+    
+    /* Ensure dropdown list is fully dark */
+    [data-testid="stSidebar"] [role="listbox"],
+    [role="listbox"] {
+        background-color: #0f172a !important;
+    }
+    
+    /* Selectbox button and container */
+    [data-baseweb="select"] {
+        background-color: rgba(139, 92, 246, 0.15) !important;
+        border: 1px solid #a78bfa !important;
+        border-radius: 8px !important;
+    }
+    
+    [data-baseweb="select"] button {
+        background-color: transparent !important;
+        border: none !important;
+    }
+    
+    /* Text area styling */
+    .stTextArea textarea {
+        background-color: #1e293b !important;
+        color: #ffffff !important;
+        border: 1px solid #a78bfa !important;
+    }
+    
+    /* Slider styling */
+    .stSlider label {
+        color: #ffffff !important;
+    }
+    
+    .stSlider > div > div {
+        color: #ffffff !important;
+    }
+    
+    /* All widgets background fix */
+    [data-testid="stWidgetLabel"] {
+        color: #ffffff !important;
+    }
+    
+    [data-testid="stForm"] {
+        background-color: transparent !important;
+    }
+    
+    /* File uploader text and dialog */
+    [data-testid="stFileUploader"],
+    [data-testid="stFileUploader"] * {
+        color: #ffffff !important;
+    }
+    
+    [data-testid="stFileUploader"] {
+        background-color: rgba(139, 92, 246, 0.15) !important;
+        border: 2px dashed #a78bfa !important;
+    }
+    
+    /* File uploader drop area */
+    [data-testid="stFileUploadDropzone"] {
+        background-color: rgba(139, 92, 246, 0.1) !important;
+    }
+    
+    /* File uploader dialog (browse files) */
+    /* This targets native file dialog but since we can't style native, style surrounding elements */
+    [data-testid="stFileUploader"] button {
+        background: linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%) !important;
+        color: white !important;
+    }
+    
+    /* Uploaded file items */
+    [data-testid="stFileUploaderFile"] {
+        background-color: rgba(139, 92, 246, 0.2) !important;
+        color: #ffffff !important;
+        border-radius: 8px !important;
     }
     
     .stMetric {
@@ -220,6 +386,7 @@ conversion_type = st.sidebar.selectbox(
     [
         "🖼️ Image to PDF",
         "🖼️ Image to Word",
+        "📝 Image to Editable Text (OCR)",
         "📄 PDF to Image", 
         "📝 PDF to Word", 
         "📊 PDF to Excel",
@@ -248,20 +415,44 @@ def image_to_pdf(uploaded_files):
         return pdf_buffer
     return None
 
-def image_to_word(uploaded_files):
+def image_to_word(uploaded_files, lang_list=['en', 'hi']):
     """
-    Converts a list of images into a single Word document.
+    Converts a list of images into a single Word document by extracting text via OCR.
     """
+    import contextlib
+    
+    # Set custom model directory
+    model_dir = os.path.join(os.getcwd(), '.easyocr_models')
+    user_network_dir = os.path.join(model_dir, 'user_network')
+    os.makedirs(model_dir, exist_ok=True)
+    os.makedirs(user_network_dir, exist_ok=True)
+    
+    # Initialize OCR reader
+    with open(os.devnull, 'w') as f_null, contextlib.redirect_stdout(f_null), contextlib.redirect_stderr(f_null):
+        reader = easyocr.Reader(lang_list, gpu=False, model_storage_directory=model_dir, user_network_directory=user_network_dir, verbose=False)
+    
     doc = Document()
-    for uploaded_file in uploaded_files:
-        # Save image to a temporary file because docx needs a file path or stream
+    for idx, uploaded_file in enumerate(uploaded_files):
+        # Add image to doc first
         img = Image.open(uploaded_file)
         img_buffer = io.BytesIO()
         img.save(img_buffer, format=img.format if img.format else 'PNG')
         img_buffer.seek(0)
+        doc.add_picture(img_buffer, width=Inches(6))
         
-        doc.add_picture(img_buffer, width=Inches(6)) # Adjust width as needed
-        doc.add_page_break()
+        # Extract text from image and add to doc
+        img_buffer_for_ocr = io.BytesIO()
+        img.save(img_buffer_for_ocr, format=img.format if img.format else 'PNG')
+        img_buffer_for_ocr.seek(0)
+        results = reader.readtext(img_buffer_for_ocr.getvalue(), detail=0)
+        extracted_text = '\n'.join(results)
+        
+        if extracted_text:
+            doc.add_paragraph(f"\n--- Page {idx+1} Extracted Text ---")
+            doc.add_paragraph(extracted_text)
+        
+        if idx != len(uploaded_files) -1:
+            doc.add_page_break()
     
     word_buffer = io.BytesIO()
     doc.save(word_buffer)
@@ -285,6 +476,20 @@ def pdf_to_images(uploaded_pdf):
     
     doc.close()
     return image_buffers
+
+def create_zip_from_images(image_buffers, base_name="pdf_pages"):
+    """
+    Creates a ZIP file from a list of image bytes.
+    Returns the ZIP buffer.
+    """
+    zip_buffer = io.BytesIO()
+    
+    with zipfile.ZipFile(zip_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for idx, img_data in enumerate(image_buffers):
+            zf.writestr(f"{base_name}_page_{idx+1}.png", img_data)
+    
+    zip_buffer.seek(0)
+    return zip_buffer
 
 def pdf_to_word(uploaded_pdf):
     """
@@ -440,6 +645,40 @@ def compress_pdf(uploaded_pdf, quality='medium'):
     
     return compressed_buffer
 
+def image_to_editable_text(uploaded_image, lang_list=['en', 'hi']):
+    """
+    Extracts editable text from an image using OCR (Optical Character Recognition).
+    Supports multiple languages (default: English + Hindi).
+    """
+    import contextlib
+    
+    # Set custom model directory inside project to avoid permission issues
+    model_dir = os.path.join(os.getcwd(), '.easyocr_models')
+    user_network_dir = os.path.join(model_dir, 'user_network')
+    os.makedirs(model_dir, exist_ok=True)
+    os.makedirs(user_network_dir, exist_ok=True)
+    
+    # Redirect stdout/stderr to null to completely suppress EasyOCR output (prevents Unicode errors)
+    with open(os.devnull, 'w') as f_null, contextlib.redirect_stdout(f_null), contextlib.redirect_stderr(f_null):
+        # Initialize EasyOCR reader with custom model and user network directories, no verbose output
+        reader = easyocr.Reader(lang_list, gpu=False, model_storage_directory=model_dir, user_network_directory=user_network_dir, verbose=False)
+    
+    # Read the image
+    img = Image.open(uploaded_image)
+    
+    # Convert image to bytes
+    img_buffer = io.BytesIO()
+    img.save(img_buffer, format=img.format if img.format else 'PNG')
+    img_buffer.seek(0)
+    
+    # Perform OCR
+    results = reader.readtext(img_buffer.getvalue(), detail=0)
+    
+    # Join the results into a single string
+    extracted_text = '\n'.join(results)
+    
+    return extracted_text
+
 # Helper function to get file size in human-readable format
 def get_file_size(file_obj):
     file_obj.seek(0, 2)  # Seek to end
@@ -495,6 +734,31 @@ elif conversion_type == "🖼️ Image to Word":
                         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                     )
 
+elif conversion_type == "📝 Image to Editable Text (OCR)":
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.subheader("Image to Editable Text (OCR)")
+    st.markdown("Extract editable text from images using Optical Character Recognition (supports English + Hindi).")
+    st.markdown("</div>", unsafe_allow_html=True)
+    
+    uploaded_image = st.file_uploader("Upload Image", type=["jpg", "jpeg", "png", "webp", "bmp", "tiff", "gif"])
+    
+    if uploaded_image:
+        st.image(uploaded_image, caption="Uploaded Image")
+        if st.button("Extract Text"):
+            with st.spinner("Extracting text from image... (This may take a moment)"):
+                extracted_text = image_to_editable_text(uploaded_image)
+                if extracted_text:
+                    st.success("🎉 Text Extracted Successfully!")
+                    st.text_area("Extracted Text:", value=extracted_text, height=300)
+                    st.download_button(
+                        label="📥 Download as Text File",
+                        data=extracted_text,
+                        file_name="extracted_text.txt",
+                        mime="text/plain"
+                    )
+                else:
+                    st.warning("⚠️ No text found in the image.")
+
 elif conversion_type == "📄 PDF to Image":
     st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.subheader("Convert PDF to Images")
@@ -509,12 +773,23 @@ elif conversion_type == "📄 PDF to Image":
                 images = pdf_to_images(uploaded_pdf)
                 if images:
                     st.success(f"🎉 Converted {len(images)} pages!")
+                    
+                    # Create ZIP buffer
+                    zip_buffer = create_zip_from_images(images, base_name=os.path.splitext(uploaded_pdf.name)[0])
+                    
+                    st.download_button(
+                        label="📥 Download All Pages as ZIP",
+                        data=zip_buffer,
+                        file_name=f"{os.path.splitext(uploaded_pdf.name)[0]}_images.zip",
+                        mime="application/zip"
+                    )
+                    
                     for i, img_data in enumerate(images):
                         st.image(img_data, caption=f"Page {i+1}")
                         st.download_button(
                             label=f"📥 Download Page {i+1} (PNG)",
                             data=img_data,
-                            file_name=f"page_{i+1}.png",
+                            file_name=f"{os.path.splitext(uploaded_pdf.name)[0]}_page_{i+1}.png",
                             mime="image/png"
                         )
 
