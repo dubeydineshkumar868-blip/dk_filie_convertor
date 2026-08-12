@@ -1,6 +1,6 @@
 # 🔄 DK File Converter
 
-Your all-in-one file conversion toolkit built with Streamlit.
+Your all-in-one file conversion & compression toolkit built with Streamlit.
 
 ## ✨ Features
 
@@ -10,6 +10,8 @@ Your all-in-one file conversion toolkit built with Streamlit.
 - 📝 **PDF to Word**: Convert PDFs to editable Word documents
 - 📊 **PDF to Excel**: Extract tables from PDFs into Excel spreadsheets
 - 📎 **Merge PDFs**: Combine multiple PDF files into one
+- 🔽 **Compress Image**: Reduce image file size with adjustable quality (1-100%)
+- 🔽 **Compress PDF**: Reduce PDF file size with high/medium/low compression levels
 
 ## 🚀 Run Locally
 
