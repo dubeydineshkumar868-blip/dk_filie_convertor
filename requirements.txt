@@ -6,3 +6,4 @@ python-docx
 pdfplumber
 pandas
 openpyxl
+easyocr
