@@ -491,6 +491,19 @@ def create_zip_from_images(image_buffers, base_name="pdf_pages"):
     zip_buffer.seek(0)
     return zip_buffer
 
+def create_zip_from_files(file_list):
+    """
+    Creates a ZIP file from a list of (file_name, file_bytes) tuples.
+    Generic helper for bundling any compressed files.
+    Returns the ZIP buffer.
+    """
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for file_name, file_bytes in file_list:
+            zf.writestr(file_name, file_bytes)
+    zip_buffer.seek(0)
+    return zip_buffer
+
 def pdf_to_word(uploaded_pdf):
     """
     Converts a PDF file to a Word document (.docx).
@@ -863,79 +876,163 @@ elif conversion_type == "📎 Merge PDFs":
 elif conversion_type == "🔽 Compress Image":
     st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.subheader("Compress Image")
-    st.markdown("Reduce image file size with adjustable quality.")
+    st.markdown("Reduce multiple image file sizes at once with adjustable quality.")
     st.markdown("</div>", unsafe_allow_html=True)
-    
-    uploaded_image = st.file_uploader("Upload Image", type=["jpg", "jpeg", "png", "webp", "bmp"])
-    
-    if uploaded_image:
-        original_size = get_file_size(uploaded_image)
-        st.info(f"📏 Original Size: {original_size}")
-        
-        quality = st.slider("Compression Quality (1-100)", min_value=1, max_value=100, value=85, 
-                           help="Lower values = smaller file size but more compression artifacts")
-        
-        if st.button("Compress Image"):
-            with st.spinner("Compressing image..."):
-                compressed_data = compress_image(uploaded_image, quality)
-                compressed_size = get_file_size(compressed_data)
-                
+
+    uploaded_images = st.file_uploader("Upload Images (single or multiple)", type=["jpg", "jpeg", "png", "webp", "bmp"], accept_multiple_files=True)
+
+    if uploaded_images:
+        st.info(f"✅ {len(uploaded_images)} image(s) selected.")
+
+        for idx, img_file in enumerate(uploaded_images):
+            img_file.seek(0)
+            orig_size = get_file_size(img_file)
+            with st.expander(f"�️ {img_file.name} — Original: {orig_size}", expanded=(idx == 0)):
+                st.image(img_file, caption=f"Original: {img_file.name}")
+
+        quality = st.slider("Compression Quality (1-100)", min_value=1, max_value=100, value=85,
+                            help="Lower values = smaller file size but more compression artifacts")
+
+        if st.button("Compress All Images"):
+            compressed_results = []
+            total_original = 0
+            total_compressed = 0
+
+            with st.spinner(f"Compressing {len(uploaded_images)} image(s)..."):
+                for img_file in uploaded_images:
+                    img_file.seek(0)
+                    img_file.seek(0, 2)
+                    total_original += img_file.tell()
+                    img_file.seek(0)
+
+                    compressed_buf = compress_image(img_file, quality)
+                    compressed_buf.seek(0, 2)
+                    total_compressed += compressed_buf.tell()
+                    compressed_buf.seek(0)
+
+                    compressed_name = f"compressed_{img_file.name.rsplit('.', 1)[0]}.jpg"
+                    compressed_results.append((compressed_name, compressed_buf.getvalue()))
+
+            st.success(f"🎉 Compression Successful for {len(compressed_results)} image(s)!")
+
+            if total_original > 0:
+                overall_reduction = ((total_original - total_compressed) / total_original) * 100
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Total Original", f"{total_original / 1024:.2f} KB")
+                c2.metric("Total Compressed", f"{total_compressed / 1024:.2f} KB")
+                c3.metric("Overall Reduction", f"{overall_reduction:.1f}%")
+
+            st.markdown("### 📦 Compressed Files")
+            for (f_name, f_bytes), src_img in zip(compressed_results, uploaded_images):
                 col1, col2 = st.columns(2)
                 with col1:
-                    st.image(uploaded_image, caption="Original Image")
+                    st.image(src_img, caption="Original", use_column_width=True)
                 with col2:
-                    st.image(compressed_data, caption="Compressed Image")
-                
-                st.success(f"🎉 Compression Successful!")
-                st.info(f"📏 Compressed Size: {compressed_size}")
-                
+                    st.image(io.BytesIO(f_bytes), caption="Compressed", use_column_width=True)
+
+                st.info(f"📄 {f_name} — {len(f_bytes) / 1024:.2f} KB")
                 st.download_button(
-                    label="📥 Download Compressed Image",
-                    data=compressed_data,
-                    file_name=f"compressed_{uploaded_image.name}",
-                    mime="image/jpeg"
+                    label=f"📥 Download {f_name}",
+                    data=f_bytes,
+                    file_name=f_name,
+                    mime="image/jpeg",
+                    key=f"dl_img_{f_name}"
+                )
+                st.markdown("---")
+
+            if len(compressed_results) > 0:
+                zip_buf = create_zip_from_files(compressed_results)
+                st.download_button(
+                    label="�️ Download All Compressed Images as ZIP",
+                    data=zip_buf.getvalue(),
+                    file_name="compressed_images.zip",
+                    mime="application/zip",
+                    key="dl_img_zip"
                 )
 
 elif conversion_type == "🔽 Compress PDF":
     st.markdown("<div class='card'>", unsafe_allow_html=True)
-    st.subheader("Compress PDF (Maximum Reduction!)")
-    st.markdown("Reduce PDF file size by compressing images. Low quality = smallest file!")
+    st.subheader("Compress PDFs (Maximum Reduction!)")
+    st.markdown("Compress multiple PDFs at once by reducing image quality inside them. Low level = smallest files!")
     st.markdown("</div>", unsafe_allow_html=True)
-    
-    uploaded_pdf = st.file_uploader("Upload PDF File", type=["pdf"])
-    
-    if uploaded_pdf:
-        original_size = get_file_size(uploaded_pdf)
-        st.info(f"📏 Original Size: {original_size}")
-        
+
+    uploaded_pdfs = st.file_uploader("Upload PDF Files (single or multiple)", type=["pdf"], accept_multiple_files=True)
+
+    if uploaded_pdfs:
+        st.info(f"✅ {len(uploaded_pdfs)} PDF(s) selected.")
+
+        for idx, pdf_file in enumerate(uploaded_pdfs):
+            pdf_file.seek(0)
+            orig_size = get_file_size(pdf_file)
+            st.markdown(f"- � **{pdf_file.name}** — Original: **{orig_size}**")
+
         quality = st.select_slider("Compression Level", options=["high", "medium", "low"], value="low",
-                                  help="Low = Maximum compression (smallest file size)")
-        
-        if st.button("Compress PDF"):
-            with st.spinner("Compressing PDF..."):
-                compressed_data = compress_pdf(uploaded_pdf, quality)
-                compressed_size = get_file_size(compressed_data)
-                
-                # Calculate and show reduction percentage
-                uploaded_pdf.seek(0,2)
-                original_size_bytes = uploaded_pdf.tell()
-                compressed_data.seek(0,2)
-                compressed_size_bytes = compressed_data.tell()
-                reduction = ((original_size_bytes - compressed_size_bytes) / original_size_bytes) * 100
-                
-                if reduction > 0:
-                    st.success(f"🎉 Compression Successful!")
-                    st.info(f"📏 Compressed Size: {compressed_size}")
-                    st.metric("Size Reduced By", f"{reduction:.1f}%")
+                                   help="Low = Maximum compression (smallest file size)")
+
+        if st.button("Compress All PDFs"):
+            compressed_results = []
+            total_original = 0
+            total_compressed = 0
+            total_reduction_positive = 0
+
+            with st.spinner(f"Compressing {len(uploaded_pdfs)} PDF(s)... This may take a moment for large files."):
+                for pdf_file in uploaded_pdfs:
+                    pdf_file.seek(0)
+                    pdf_file.seek(0, 2)
+                    orig_bytes = pdf_file.tell()
+                    total_original += orig_bytes
+                    pdf_file.seek(0)
+
+                    compressed_buf = compress_pdf(pdf_file, quality)
+                    compressed_buf.seek(0, 2)
+                    comp_bytes = compressed_buf.tell()
+                    total_compressed += comp_bytes
+                    compressed_buf.seek(0)
+
+                    if comp_bytes < orig_bytes:
+                        total_reduction_positive += 1
+
+                    compressed_name = f"compressed_{pdf_file.name}"
+                    compressed_results.append((compressed_name, compressed_buf.getvalue(), orig_bytes, comp_bytes))
+
+            st.success(f"🎉 Compression Finished for {len(compressed_results)} PDF(s)!")
+
+            if total_original > 0:
+                overall_reduction = ((total_original - total_compressed) / total_original) * 100
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Total Original", f"{total_original / (1024 * 1024):.2f} MB")
+                c2.metric("Total Compressed", f"{total_compressed / (1024 * 1024):.2f} MB")
+                c3.metric("Overall Reduction", f"{overall_reduction:.1f}%")
+
+            st.markdown("### 📦 Individual Results")
+            for f_name, f_bytes, orig_b, comp_b in compressed_results:
+                red_percent = ((orig_b - comp_b) / orig_b) * 100 if orig_b > 0 else 0
+                colA, colB, colC = st.columns(3)
+                colA.info(f"� {f_name}")
+                colB.info(f"Size: {orig_b / 1024:.1f} KB → {comp_b / 1024:.1f} KB")
+                if red_percent > 0:
+                    colC.success(f"Reduced by {red_percent:.1f}%")
                 else:
-                    st.warning("⚠️ Couldn't reduce file size much - PDF is already optimized!")
-                    st.info(f"📏 Compressed Size: {compressed_size} (same as original)")
-                
+                    colC.warning("Already optimized")
+
                 st.download_button(
-                    label="📥 Download Compressed PDF",
-                    data=compressed_data,
-                    file_name=f"compressed_{uploaded_pdf.name}",
-                    mime="application/pdf"
+                    label=f"📥 Download {f_name}",
+                    data=f_bytes,
+                    file_name=f_name,
+                    mime="application/pdf",
+                    key=f"dl_pdf_{f_name}"
+                )
+                st.markdown("---")
+
+            if len(compressed_results) > 0:
+                zip_pairs = [(name, data) for name, data, _, _ in compressed_results]
+                zip_buf = create_zip_from_files(zip_pairs)
+                st.download_button(
+                    label="�️ Download All Compressed PDFs as ZIP",
+                    data=zip_buf.getvalue(),
+                    file_name="compressed_pdfs.zip",
+                    mime="application/zip",
+                    key="dl_pdf_zip"
                 )
 
 # Footer
