@@ -900,18 +900,15 @@ elif conversion_type == "🔽 Compress Image":
 
             with st.spinner(f"Compressing {len(uploaded_images)} image(s)..."):
                 for img_file in uploaded_images:
-                    img_file.seek(0)
-                    img_file.seek(0, 2)
-                    total_original += img_file.tell()
-                    img_file.seek(0)
+                    img_raw = img_file.getvalue()
+                    total_original += len(img_raw)
 
-                    compressed_buf = compress_image(img_file, quality)
-                    compressed_buf.seek(0, 2)
-                    total_compressed += compressed_buf.tell()
-                    compressed_buf.seek(0)
+                    compressed_buf = compress_image(io.BytesIO(img_raw), quality)
+                    comp_raw = compressed_buf.getvalue()
+                    total_compressed += len(comp_raw)
 
                     compressed_name = f"compressed_{img_file.name.rsplit('.', 1)[0]}.jpg"
-                    compressed_results.append((compressed_name, compressed_buf.getvalue()))
+                    compressed_results.append((compressed_name, comp_raw))
 
             st.success(f"🎉 Compression Successful for {len(compressed_results)} image(s)!")
 
@@ -926,9 +923,9 @@ elif conversion_type == "🔽 Compress Image":
             for (f_name, f_bytes), src_img in zip(compressed_results, uploaded_images):
                 col1, col2 = st.columns(2)
                 with col1:
-                    st.image(src_img, caption="Original", use_column_width=True)
+                    st.image(io.BytesIO(src_img.getvalue()), caption="Original", use_container_width=True)
                 with col2:
-                    st.image(io.BytesIO(f_bytes), caption="Compressed", use_column_width=True)
+                    st.image(io.BytesIO(f_bytes), caption="Compressed", use_container_width=True)
 
                 st.info(f"📄 {f_name} — {len(f_bytes) / 1024:.2f} KB")
                 st.download_button(
@@ -977,17 +974,14 @@ elif conversion_type == "🔽 Compress PDF":
 
             with st.spinner(f"Compressing {len(uploaded_pdfs)} PDF(s)... This may take a moment for large files."):
                 for pdf_file in uploaded_pdfs:
-                    pdf_file.seek(0)
-                    pdf_file.seek(0, 2)
-                    orig_bytes = pdf_file.tell()
+                    pdf_raw = pdf_file.getvalue()
+                    orig_bytes = len(pdf_raw)
                     total_original += orig_bytes
-                    pdf_file.seek(0)
 
-                    compressed_buf = compress_pdf(pdf_file, quality)
-                    compressed_buf.seek(0, 2)
-                    comp_bytes = compressed_buf.tell()
+                    compressed_buf = compress_pdf(io.BytesIO(pdf_raw), quality)
+                    compressed_raw = compressed_buf.getvalue()
+                    comp_bytes = len(compressed_raw)
                     total_compressed += comp_bytes
-                    compressed_buf.seek(0)
 
                     if comp_bytes < orig_bytes:
                         total_reduction_positive += 1
