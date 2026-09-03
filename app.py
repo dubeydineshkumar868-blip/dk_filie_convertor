@@ -17,6 +17,8 @@ import pandas as pd
 import io
 import tempfile
 import easyocr
+import numpy as np
+import cv2
 
 # Set page configuration with custom theme
 st.set_page_config(
@@ -392,7 +394,8 @@ conversion_type = st.sidebar.selectbox(
         "📊 PDF to Excel",
         "📎 Merge PDFs",
         "🔽 Compress Image",
-        "🔽 Compress PDF"
+        "🔽 Compress PDF",
+        "🧹 Remove Watermark from Images"
     ]
 )
 
@@ -691,6 +694,58 @@ def image_to_editable_text(uploaded_image, lang_list=['en', 'hi']):
     extracted_text = '\n'.join(results)
     
     return extracted_text
+
+def detect_watermark_mask(img_bgr, tolerance=30, dilate_size=3):
+    """
+    Automatically detects light-colored/semi-transparent watermarks.
+    Returns a single-channel mask (uint8) where watermark pixels > 0.
+    Uses L channel from LAB + threshold + morphological dilation.
+    """
+    lab = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB)
+    l_channel = lab[:, :, 0]
+    _, bright_mask = cv2.threshold(l_channel, 255 - tolerance, 255, cv2.THRESH_BINARY)
+    white_mask = cv2.inRange(img_bgr, (255 - tolerance, 255 - tolerance, 255 - tolerance), (255, 255, 255))
+    combined = cv2.bitwise_or(bright_mask, white_mask)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (dilate_size, dilate_size))
+    dilated = cv2.dilate(combined, kernel, iterations=2)
+    return dilated
+
+def remove_watermark(image_buffer, tolerance=30, inpaint_radius=5, method='auto'):
+    """
+    Remove watermark from an image (given as file-like / BytesIO / bytes).
+    Returns cleaned image bytes (PNG).
+    method:
+      - 'auto'   => auto-detect watermark mask & inpaint
+      - 'manual' => caller provides mask separately; here equivalent to auto
+    """
+    try:
+        if hasattr(image_buffer, 'read'):
+            raw = image_buffer.read()
+        elif isinstance(image_buffer, (bytes, bytearray)):
+            raw = bytes(image_buffer)
+        else:
+            raw = image_buffer
+        arr = np.frombuffer(raw, np.uint8)
+        img_bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if img_bgr is None:
+            return None
+    except Exception:
+        return None
+
+    mask = detect_watermark_mask(img_bgr, tolerance=tolerance, dilate_size=3)
+
+    if cv2.countNonZero(mask) == 0:
+        clean_bgr = img_bgr
+    else:
+        try:
+            clean_bgr = cv2.inpaint(img_bgr, mask, inpaint_radius, cv2.INPAINT_TELEA)
+        except Exception:
+            clean_bgr = img_bgr
+
+    ok, encoded = cv2.imencode('.png', clean_bgr)
+    if not ok:
+        return None
+    return encoded.tobytes()
 
 # Helper function to get file size in human-readable format
 def get_file_size(file_obj):
@@ -1022,12 +1077,96 @@ elif conversion_type == "🔽 Compress PDF":
                 zip_pairs = [(name, data) for name, data, _, _ in compressed_results]
                 zip_buf = create_zip_from_files(zip_pairs)
                 st.download_button(
-                    label="�️ Download All Compressed PDFs as ZIP",
+                    label="🗂️ Download All Compressed PDFs as ZIP",
                     data=zip_buf.getvalue(),
                     file_name="compressed_pdfs.zip",
                     mime="application/zip",
                     key="dl_pdf_zip"
                 )
+
+elif conversion_type == "🧹 Remove Watermark from Images":
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.subheader("Remove Watermark from Images")
+    st.markdown("Automatically remove light / white / semi-transparent watermarks from one or multiple images using AI-free inpainting.")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    uploaded_imgs = st.file_uploader(
+        "Upload Images (single or multiple)",
+        type=["jpg", "jpeg", "png", "webp", "bmp", "tiff"],
+        accept_multiple_files=True
+    )
+
+    if uploaded_imgs:
+        st.info(f"✅ {len(uploaded_imgs)} image(s) selected.")
+
+        tolerance = st.slider(
+            "Watermark Detection Sensitivity",
+            min_value=5, max_value=80, value=30,
+            help="Higher value = more aggressive detection (removes larger range of bright pixels). Lower = conservative."
+        )
+        inpaint_radius = st.slider(
+            "Inpaint Radius (smoothness)",
+            min_value=1, max_value=15, value=5,
+            help="Larger radius = smoother blending around detected watermark."
+        )
+
+        for idx, f in enumerate(uploaded_imgs):
+            raw = f.getvalue()
+            size_kb = len(raw) / 1024
+            size_str = f"{size_kb:.2f} KB" if size_kb < 1024 else f"{size_kb / 1024:.2f} MB"
+            with st.expander(f"🖼️ {f.name} — {size_str}", expanded=(idx == 0)):
+                st.image(io.BytesIO(raw), caption=f"Original: {f.name}", use_container_width=True)
+
+        if st.button("Remove Watermark from All"):
+            results = []
+            with st.spinner(f"Processing {len(uploaded_imgs)} image(s)..."):
+                for f in uploaded_imgs:
+                    raw = f.getvalue()
+                    cleaned = remove_watermark(
+                        io.BytesIO(raw),
+                        tolerance=tolerance,
+                        inpaint_radius=inpaint_radius
+                    )
+                    base = f.name.rsplit(".", 1)[0]
+                    out_name = f"no_watermark_{base}.png"
+                    results.append((out_name, raw, cleaned))
+
+            success_count = sum(1 for _, _, c in results if c is not None)
+            if success_count == 0:
+                st.error("❌ Could not process any image. Please try a different format.")
+            else:
+                st.success(f"🎉 Processed {success_count}/{len(results)} image(s).")
+
+                st.markdown("### 📦 Results")
+                for f_name, orig_bytes, clean_bytes in results:
+                    if clean_bytes is None:
+                        st.warning(f"⚠️ Skipped {f_name} — unsupported format or read error.")
+                        continue
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.image(io.BytesIO(orig_bytes), caption="Original", use_container_width=True)
+                    with col2:
+                        st.image(io.BytesIO(clean_bytes), caption="Watermark Removed", use_container_width=True)
+                    st.info(f"📄 {f_name} — Output: {len(clean_bytes) / 1024:.2f} KB")
+                    st.download_button(
+                        label=f"📥 Download {f_name}",
+                        data=clean_bytes,
+                        file_name=f_name,
+                        mime="image/png",
+                        key=f"dl_wm_{f_name}"
+                    )
+                    st.markdown("---")
+
+                ok_results = [(n, c) for n, _o, c in results if c is not None]
+                if ok_results:
+                    zip_b = create_zip_from_files(ok_results)
+                    st.download_button(
+                        label="🗂️ Download All as ZIP",
+                        data=zip_b.getvalue(),
+                        file_name="no_watermark_images.zip",
+                        mime="application/zip",
+                        key="dl_wm_zip"
+                    )
 
 # Footer
 st.markdown("""
