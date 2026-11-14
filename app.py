@@ -1067,36 +1067,110 @@ def build_p2p_html(mode, code, peer_opts=None, peerjs_src=PEERJS_SRC):
             .replace("__CODE__", json.dumps(code))
             .replace("__PEER_OPTS__", json.dumps(opts)))
 
-P2P_HTML = """
+P2P_HTML = r"""
 <style>
-  body { margin:0; font-family: system-ui, -apple-system, Segoe UI, sans-serif; color:#fff; background:transparent; }
-  .box { background:#1e293b; border-radius:16px; padding:18px; border-left:5px solid #8b5cf6; margin-bottom:12px; }
-  .code { font-size:40px; font-weight:900; letter-spacing:10px; font-family:ui-monospace, Menlo, Consolas, monospace;
-          background:linear-gradient(135deg,#8b5cf6,#ec4899); -webkit-background-clip:text; background-clip:text;
-          color:transparent; margin:6px 0; }
-  .drop { border:2px dashed #a78bfa; border-radius:16px; padding:26px 16px; text-align:center;
-          background:rgba(139,92,246,.12); cursor:pointer; transition:background .2s; }
-  .drop.over { background:rgba(236,72,153,.2); }
-  .drop.off { opacity:.45; cursor:not-allowed; }
-  .btn { background:linear-gradient(135deg,#8b5cf6,#ec4899); color:#fff; border:none; border-radius:50px;
-         padding:11px 26px; font-weight:800; font-size:15px; cursor:pointer; margin-top:10px; }
-  .btn.sm { padding:7px 16px; font-size:13px; margin:6px 0 0; }
-  .btn:disabled { opacity:.45; cursor:not-allowed; }
-  .item { background:#0f172a; border-radius:12px; padding:11px 14px; margin-top:9px; border-left:4px solid #8b5cf6; }
-  .bar { height:8px; background:#334155; border-radius:8px; overflow:hidden; margin-top:8px; }
-  .fill { height:100%; width:0; background:linear-gradient(90deg,#8b5cf6,#ec4899); transition:width .2s; }
-  .small { font-size:13px; color:#cbd5e1; margin-top:4px; }
-  .ok { color:#6ee7b7; } .err { color:#fca5a5; } .wait { color:#fcd34d; }
-  input.link { width:100%; box-sizing:border-box; background:#0f172a; color:#fff; border:1px solid #a78bfa;
-               border-radius:8px; padding:8px; font-size:13px; margin-top:6px; }
-  a.save { color:#f9a8d4; font-weight:700; }
+  @import url('https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&display=swap');
+  :root { --ink:#0f172a; --panel:#161f35; --panel2:#1d2844; --line:#2b3758; --violet:#8b5cf6; --pink:#ec4899;
+          --mint:#34d399; --amber:#fbbf24; --red:#f87171; --text:#f1f5f9; --muted:#9aa8c1; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; font-size:14px;
+         color:var(--text); background:transparent; line-height:1.45; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:18px; padding:16px 18px; margin-bottom:12px; }
+
+  /* device-to-device connection strip */
+  .linkrow { display:flex; align-items:center; gap:12px; }
+  .dev { display:flex; align-items:center; gap:10px; min-width:0; }
+  .dev.right { flex-direction:row-reverse; text-align:right; }
+  .dev .ic { width:44px; height:44px; border-radius:13px; display:grid; place-items:center; font-size:21px; flex:none;
+             background:var(--panel2); border:1px solid var(--line); }
+  .dev.me .ic { background:linear-gradient(135deg,var(--violet),var(--pink)); border-color:transparent; }
+  .dev b { display:block; font-family:Sora, system-ui, sans-serif; font-size:14px; font-weight:700; }
+  .dev span { display:block; font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .wire { flex:1; min-width:36px; height:4px; border-radius:4px; background:var(--line); position:relative; overflow:hidden; }
+  .wire::after { content:""; position:absolute; top:0; bottom:0; left:-40px; right:0; opacity:0;
+                 background:repeating-linear-gradient(90deg, rgba(255,255,255,.45) 0 8px, transparent 8px 40px); }
+  [data-state=ready] .wire { background:repeating-linear-gradient(90deg, var(--amber) 0 6px, transparent 6px 12px); }
+  [data-state=connected] .wire { background:var(--mint); }
+  [data-state=busy] .wire { background:linear-gradient(90deg,var(--violet),var(--pink)); }
+  [data-state=busy] .wire::after { opacity:1; animation:flow .9s linear infinite; }
+  [data-state=error] .wire { background:var(--red); }
+  @keyframes flow { from { transform:translateX(0); } to { transform:translateX(40px); } }
+  .state { margin-top:12px; display:flex; gap:9px; align-items:flex-start; font-size:13px; }
+  .dot { width:8px; height:8px; border-radius:50%; margin-top:5px; flex:none; background:var(--muted); animation:pulse 1.6s ease-in-out infinite; }
+  [data-state=ready] .dot { background:var(--amber); }
+  [data-state=connected] .dot, [data-state=busy] .dot { background:var(--mint); animation:none; }
+  [data-state=error] .dot { background:var(--red); animation:none; }
+  @keyframes pulse { 50% { opacity:.25; } }
+
+  /* pairing code */
+  .codewrap { display:flex; align-items:flex-end; justify-content:space-between; gap:14px; flex-wrap:wrap; }
+  .hint { font-size:12px; color:var(--muted); margin-bottom:8px; }
+  .tiles { display:flex; gap:7px; }
+  .tile { width:44px; height:56px; border-radius:12px; display:grid; place-items:center; background:var(--ink);
+          border:1px solid var(--line); box-shadow: inset 0 -3px 0 var(--violet);
+          font-family:Sora, system-ui, sans-serif; font-weight:800; font-size:26px; }
+  .actions { display:flex; gap:8px; flex-wrap:wrap; }
+  .chip { border:1px solid var(--line); background:var(--panel2); color:var(--text); border-radius:999px; padding:8px 14px;
+          font:600 13px system-ui, sans-serif; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; gap:6px; }
+  .chip:hover { border-color:var(--violet); }
+  .chip.wa { background:#15803d; border-color:#15803d; color:#fff; }
+  .chip.wa:hover { background:#16a34a; }
+
+  /* drop zone */
+  .drop { border:2px dashed #46557e; border-radius:18px; padding:24px 16px 20px; text-align:center;
+          background:rgba(139,92,246,.06); transition:border-color .15s, background .15s; }
+  .drop.over { border-color:var(--pink); background:rgba(236,72,153,.1); }
+  .drop.off { opacity:.45; }
+  .drop .icon { font-size:34px; line-height:1; }
+  .drop .big { font-family:Sora, system-ui, sans-serif; font-size:17px; font-weight:700; margin:8px 0 2px; }
+  .drop .sub { font-size:12px; color:var(--muted); }
+  .pick { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin:14px 0 12px; }
+
+  .btn { background:linear-gradient(135deg,var(--violet),var(--pink)); color:#fff; border:none; border-radius:999px;
+         padding:10px 20px; font:700 14px system-ui, sans-serif; cursor:pointer; }
+  .btn.ghost { background:var(--panel2); border:1px solid var(--line); }
+  .btn.ghost:hover { border-color:var(--violet); }
+  .btn.big { width:100%; padding:14px 20px; font-size:16px; margin-top:12px; box-shadow:0 10px 30px rgba(139,92,246,.35); }
+  .btn:disabled { opacity:.45; cursor:not-allowed; box-shadow:none; }
+  :focus-visible { outline:2px solid var(--pink); outline-offset:2px; }
+
+  /* file list */
+  .rows { background:var(--panel); border:1px solid var(--line); border-radius:18px; overflow:hidden; margin-top:12px; }
+  .rows:empty { display:none; }
+  .row { display:flex; gap:12px; align-items:center; padding:12px 14px; border-top:1px solid var(--line); }
+  .row:first-child { border-top:none; }
+  .ft { width:40px; height:40px; border-radius:11px; display:grid; place-items:center; font-size:19px; flex:none; }
+  .rbody { flex:1; min-width:0; }
+  .name { font-weight:650; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .meta { font-size:12px; color:var(--muted); }
+  .bar { height:6px; background:var(--ink); border-radius:6px; overflow:hidden; margin:7px 0 4px; }
+  .fill { height:100%; width:0; background:linear-gradient(90deg,var(--violet),var(--pink)); border-radius:6px; transition:width .25s; }
+  .fill.done { background:var(--mint); }
+  .small { font-size:12px; color:var(--muted); }
+  .x { background:none; border:none; color:var(--muted); font-size:15px; cursor:pointer; padding:6px 8px; border-radius:8px; flex:none; }
+  .x:hover { color:var(--red); background:var(--panel2); }
+
+  .total { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; font-size:13px; color:var(--muted); margin-top:10px; padding:0 4px; }
+  .total:empty { display:none; }
+  .total b { color:var(--text); }
+  .msg { margin-top:10px; font-size:13px; padding:0 4px; }
+  .ok { color:var(--mint); } .err { color:var(--red); } .wait { color:var(--amber); }
+  a.save { display:inline-block; margin-top:2px; color:#f9a8d4; font-weight:700; text-decoration:none; }
+  a.save:hover { text-decoration:underline; }
+
+  @media (max-width:520px) {
+    .tile { width:38px; height:48px; font-size:22px; }
+    .dev span { display:none; }
+    .codewrap { align-items:flex-start; }
+  }
+  @media (prefers-reduced-motion: reduce) { *, *::after { animation:none !important; transition:none !important; } }
 </style>
 <div id="app"></div>
 <script src="__PEERJS_SRC__"></script>
 <script>
   // backup CDN if the first one is blocked or down
   if (typeof Peer === 'undefined')
-    document.write('<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"><\\/script>');
+    document.write('<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"><\/script>');
 </script>
 <script>
 const MODE = __MODE__, CODE = __CODE__, OPTS = __PEER_OPTS__;
@@ -1105,17 +1179,20 @@ const READ_BLOCK = 1024 * 1024;          // read file 1 MB at a time
 const HIGH_WATER = 8 * 1024 * 1024;      // pause sending above 8 MB in buffer
 const LOW_WATER = 1024 * 1024;           // resume below 1 MB
 const FLUSH_BYTES = 16 * 1024 * 1024;    // receiver: pack chunks into a Blob every 16 MB
+const LIST_SLICE = 300;                  // groups per "list" message
+const ZIP64_LIMIT = (typeof window.__ZIP64_LIMIT__ === 'number') ? window.__ZIP64_LIMIT__ : 0xFFFFFFFF;
 const app = document.getElementById('app');
 const $ = id => document.getElementById(id);
 
 function fmt(b) { const u=['B','KB','MB','GB','TB']; let i=0; while (b>=1024 && i<4) { b/=1024; i++; } return b.toFixed(i ? 2 : 0) + ' ' + u[i]; }
 function esc(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function eta(s) { s = Math.max(0, Math.round(s)); return s >= 3600 ? Math.floor(s/3600)+'h '+Math.floor(s%3600/60)+'m' : s >= 60 ? Math.floor(s/60)+'m '+(s%60)+'s' : s+'s'; }
+function pct(done, total) { return total ? Math.min(100, done / total * 100) : 100; }
 function setStatus(id, html, cls) { const el = $(id); if (el) el.innerHTML = cls ? `<span class="${cls}">${html}</span>` : html; }
 function progressText(done, total, t0) {
   const secs = Math.max((Date.now() - t0) / 1000, 0.5), speed = done / secs;
   const left = speed > 0 ? (total - done) / speed : 0;
-  return `${(total ? done/total*100 : 100).toFixed(1)}% • ${fmt(done)} / ${fmt(total)} • ${fmt(speed)}/s • ~${eta(left)} baaki`;
+  return `${pct(done, total).toFixed(1)}% • ${fmt(done)} / ${fmt(total)} • ${fmt(speed)}/s • ~${eta(left)} baaki`;
 }
 let wakeLock = null;
 async function keepAwake(on) {
@@ -1124,18 +1201,18 @@ async function keepAwake(on) {
     if (!on && wakeLock) { await wakeLock.release(); wakeLock = null; }
   } catch (e) {}
 }
-function copyText(text, btn) {
+function copyText(text, btn, label) {
   try { navigator.clipboard.writeText(text); } catch (e) {}
   const t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select();
   try { document.execCommand('copy'); } catch (e) {}
-  t.remove(); btn.textContent = '✅ Copied!'; setTimeout(() => btn.textContent = '📋 Copy', 2000);
+  t.remove(); btn.textContent = '✅ Copied!'; setTimeout(() => btn.textContent = label, 2000);
 }
 function shareUrl() {
   for (const w of [window.top, window.parent]) {
     try {
       const u = new URL(w.location.href);
       if (!u.protocol.startsWith('http')) continue;
-      u.search = ''; u.hash = ''; u.pathname = u.pathname.replace(/\\/~\\/\\+\\/?$/, '/');
+      u.search = ''; u.hash = ''; u.pathname = u.pathname.replace(/\/~\/\+\/?$/, '/');
       u.searchParams.set('receive', CODE);
       return u.toString();
     } catch (e) {}
@@ -1159,56 +1236,246 @@ function watchIce(conn, onFail) {
 const ICE_FAIL_TEXT = 'Dono devices aapas mein connect nahi ho paaye (network strict hai). ' +
   'Dono ek hi WiFi par try karo, ya mobile hotspot badal kar dekho.';
 
+/* ---------------- UI helpers ---------------- */
+function tilesHtml(code) { return [...code].map(c => `<div class="tile">${esc(c)}</div>`).join(''); }
+const FILE_KINDS = [
+  [/\.(jpe?g|png|gif|webp|bmp|tiff?|heic|svg)$/i, '🖼️', '#1e3a5f'],
+  [/\.(mp4|mkv|mov|avi|webm|m4v|3gp)$/i, '🎬', '#4a1d3f'],
+  [/\.(mp3|wav|m4a|aac|flac|ogg|opus)$/i, '🎵', '#1f4a3a'],
+  [/\.pdf$/i, '📕', '#4c1d24'],
+  [/\.(zip|rar|7z|tar|gz|bz2|xz)$/i, '🗜️', '#4a3a16'],
+  [/\.(docx?|txt|rtf|odt|md)$/i, '📝', '#1e3350'],
+  [/\.(xlsx?|csv|ods)$/i, '📊', '#1a4030'],
+  [/\.(pptx?|odp|key)$/i, '📽️', '#4a2a16'],
+  [/\.(apk|exe|msi|dmg|iso)$/i, '📦', '#2f2a52'],
+];
+function fileIcon(name, kind) {
+  if (kind === 'folder') return `<div class="ft" style="background:#3b2f6b">📁</div>`;
+  for (const [re, ic, bg] of FILE_KINDS) if (re.test(name)) return `<div class="ft" style="background:${bg}">${ic}</div>`;
+  return `<div class="ft" style="background:#2b3758">📄</div>`;
+}
+// state: wait | ready | connected | busy | error
+function setConn(state, sub) {
+  const el = $('conn'); if (!el) return;
+  el.dataset.state = state;
+  if (sub !== undefined) $('themsub').textContent = sub;
+  $('themic').textContent = (state === 'connected' || state === 'busy') ? '📱' : state === 'error' ? '⚠️' : '⌛';
+}
+function totalLine(count, size, done, t0) {
+  if (!count) return '';
+  const left = `<span><b>${count}</b> file(s) • <b>${fmt(size)}</b></span>`;
+  if (done == null) return left;
+  return left + `<span>Kul: ${progressText(done, size, t0)}</span>`;
+}
+
+/* ---------------- CRC32 + ZIP (store, no compression, ZIP64 when needed) ---------------- */
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1); t[n] = c >>> 0; }
+  return t;
+})();
+function crc32(crc, buf) {
+  const u = new Uint8Array(buf); let c = (crc ^ 0xFFFFFFFF) >>> 0;
+  for (let i = 0; i < u.length; i++) c = CRC_TABLE[(c ^ u[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+class ZipBuilder {
+  constructor() {
+    this.parts = []; this.central = []; this.offset = 0; this.count = 0;
+    const d = new Date();
+    this.time = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+    this.date = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+  }
+  add(path, size, crc, dataParts) {
+    const name = new TextEncoder().encode(path);
+    const big = size >= ZIP64_LIMIT, extraLen = big ? 20 : 0;
+    const h = new DataView(new ArrayBuffer(30 + name.length + extraLen));
+    h.setUint32(0, 0x04034b50, true); h.setUint16(4, big ? 45 : 20, true); h.setUint16(6, 0x0800, true);
+    h.setUint16(8, 0, true); h.setUint16(10, this.time, true); h.setUint16(12, this.date, true);
+    h.setUint32(14, crc, true);
+    h.setUint32(18, big ? 0xFFFFFFFF : size, true); h.setUint32(22, big ? 0xFFFFFFFF : size, true);
+    h.setUint16(26, name.length, true); h.setUint16(28, extraLen, true);
+    new Uint8Array(h.buffer).set(name, 30);
+    if (big) {
+      const o = 30 + name.length;
+      h.setUint16(o, 1, true); h.setUint16(o + 2, 16, true);
+      h.setBigUint64(o + 4, BigInt(size), true); h.setBigUint64(o + 12, BigInt(size), true);
+    }
+    this.central.push({ name, size, crc, big, localOffset: this.offset });
+    this.parts.push(h.buffer, ...dataParts);
+    this.offset += h.byteLength + size;
+    this.count++;
+  }
+  finish() {
+    const cdStart = this.offset, cd = []; let cdSize = 0;
+    for (const e of this.central) {
+      const offBig = e.localOffset >= ZIP64_LIMIT, z = e.big || offBig;
+      const fields = []; if (e.big) fields.push(e.size, e.size); if (offBig) fields.push(e.localOffset);
+      const extraLen = fields.length ? 4 + 8 * fields.length : 0;
+      const v = new DataView(new ArrayBuffer(46 + e.name.length + extraLen));
+      // "made by" = Unix (3) so unzip tools never apply DOS codepage conversion to UTF-8 names
+      v.setUint32(0, 0x02014b50, true); v.setUint16(4, (3 << 8) | (z ? 45 : 20), true); v.setUint16(6, z ? 45 : 20, true);
+      v.setUint16(8, 0x0800, true); v.setUint16(10, 0, true); v.setUint16(12, this.time, true); v.setUint16(14, this.date, true);
+      v.setUint32(16, e.crc, true);
+      v.setUint32(20, e.big ? 0xFFFFFFFF : e.size, true); v.setUint32(24, e.big ? 0xFFFFFFFF : e.size, true);
+      v.setUint16(28, e.name.length, true); v.setUint16(30, extraLen, true);
+      v.setUint32(38, (0o100644 << 16) >>> 0, true);   // regular file, rw-r--r--
+      v.setUint32(42, offBig ? 0xFFFFFFFF : e.localOffset, true);
+      new Uint8Array(v.buffer).set(e.name, 46);
+      if (extraLen) {
+        let o = 46 + e.name.length;
+        v.setUint16(o, 1, true); v.setUint16(o + 2, 8 * fields.length, true); o += 4;
+        for (const f of fields) { v.setBigUint64(o, BigInt(f), true); o += 8; }
+      }
+      cd.push(v.buffer); cdSize += v.byteLength;
+    }
+    const tail = [];
+    const z64 = this.count >= 0xFFFF || cdSize >= ZIP64_LIMIT || cdStart >= ZIP64_LIMIT;
+    if (z64) {
+      const r = new DataView(new ArrayBuffer(76));
+      r.setUint32(0, 0x06064b50, true); r.setBigUint64(4, BigInt(44), true); r.setUint16(12, 45, true); r.setUint16(14, 45, true);
+      r.setBigUint64(24, BigInt(this.count), true); r.setBigUint64(32, BigInt(this.count), true);
+      r.setBigUint64(40, BigInt(cdSize), true); r.setBigUint64(48, BigInt(cdStart), true);
+      r.setUint32(56, 0x07064b50, true); r.setBigUint64(64, BigInt(cdStart + cdSize), true); r.setUint32(72, 1, true);
+      tail.push(r.buffer);
+    }
+    const end = new DataView(new ArrayBuffer(22));
+    end.setUint32(0, 0x06054b50, true);
+    end.setUint16(8, z64 ? 0xFFFF : this.count, true); end.setUint16(10, z64 ? 0xFFFF : this.count, true);
+    end.setUint32(12, z64 ? 0xFFFFFFFF : cdSize, true); end.setUint32(16, z64 ? 0xFFFFFFFF : cdStart, true);
+    tail.push(end.buffer);
+    return new Blob([...this.parts, ...cd, ...tail], { type: 'application/zip' });
+  }
+}
+
 /* ============================ SENDER ============================ */
+async function entriesFromDrop(dt) {
+  // grab entries synchronously - DataTransfer items expire after the first await
+  const roots = [...(dt.items || [])].map(i => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
+  if (!roots.length) return [...dt.files].map(f => ({ file: f, path: f.name }));
+  const out = [];
+  async function walk(entry) {
+    if (entry.isFile) {
+      const f = await new Promise((res, rej) => entry.file(res, rej));
+      out.push({ file: f, path: entry.fullPath.replace(/^\/+/, '') });
+    } else if (entry.isDirectory) {
+      const reader = entry.createReader(); let batch;
+      do {
+        batch = await new Promise((res, rej) => reader.readEntries(res, rej));
+        for (const child of batch) await walk(child);
+      } while (batch.length);
+    }
+  }
+  for (const r of roots) await walk(r);
+  return out;
+}
+
 function initSender() {
   app.innerHTML = `
-    <div class="box">
-      <div class="small">Aapka transfer code</div>
-      <div class="code">${esc(CODE)}</div>
-      <div id="pstatus" class="small wait">⏳ Ready ho raha hai…</div>
-      <div id="linkwrap" style="display:none">
-        <div class="small" style="margin-top:10px">Ye link receiver ko bhejo (WhatsApp, email kahin bhi):</div>
-        <input id="link" class="link" readonly>
-        <button id="cpl" class="btn sm">📋 Copy</button>
+    <div class="panel" id="conn" data-state="wait">
+      <div class="linkrow">
+        <div class="dev me"><div class="ic">💻</div><div><b>Aap</b><span>Bhej rahe ho</span></div></div>
+        <div class="wire"></div>
+        <div class="dev right"><div class="ic" id="themic">⌛</div><div><b>Receiver</b><span id="themsub">Abhi juda nahi</span></div></div>
+      </div>
+      <div class="state"><span class="dot"></span><span id="pstatus">Ready ho raha hai…</span></div>
+    </div>
+    <div class="panel">
+      <div class="codewrap">
+        <div><div class="hint">Receiver ko ye code do</div><div class="tiles">${tilesHtml(CODE)}</div></div>
+        <div class="actions">
+          <button class="chip" id="cpc">📋 Code copy</button>
+          <button class="chip" id="cpl" style="display:none">🔗 Link copy</button>
+          <a class="chip wa" id="wa" target="_blank" rel="noopener" style="display:none">💬 WhatsApp par bhejo</a>
+        </div>
       </div>
     </div>
-    <div id="drop" class="drop">📂 <b>Click karke files chuno</b> ya yahan drag &amp; drop karo<br>
-      <span class="small">Koi size limit nahi &bull; files kisi server par save nahi hoti</span></div>
+    <div id="drop" class="drop">
+      <div class="icon">📦</div>
+      <div class="big">Files ya poora folder yahan chhodo</div>
+      <div class="sub">Ya neeche se chuno. Koi size limit nahi, kuch bhi server par save nahi hota.</div>
+      <div class="pick">
+        <button id="pf" class="btn">📄 Files chuno</button>
+        <button id="pd" class="btn ghost">📁 Folder chuno</button>
+      </div>
+      <div class="sub">Folder receiver ko ZIP file mein milega</div>
+    </div>
     <input id="inp" type="file" multiple style="display:none">
-    <div id="list"></div>
-    <div id="status" class="small" style="margin-top:10px"></div>`;
+    <input id="dinp" type="file" webkitdirectory directory multiple style="display:none">
+    <div id="list" class="rows"></div>
+    <div id="total" class="total"></div>
+    <div id="status" class="msg"></div>`;
 
+  $('cpc').onclick = () => copyText(CODE, $('cpc'), '📋 Code copy');
   const url = shareUrl();
-  if (url) { $('link').value = url; $('linkwrap').style.display = ''; $('cpl').onclick = () => copyText(url, $('cpl')); }
+  if (url) {
+    $('cpl').style.display = ''; $('cpl').onclick = () => copyText(url, $('cpl'), '🔗 Link copy');
+    $('wa').style.display = '';
+    $('wa').href = 'https://wa.me/?text=' + encodeURIComponent(`Ye file(s) lene ke liye link kholo:\n${url}\n\nCode: ${CODE}`);
+  }
 
-  let files = [], conn = null, dc = null, sending = false, batchDone = false;
-  const drop = $('drop'), inp = $('inp');
-  drop.onclick = () => { if (!sending) inp.click(); };
+  let groups = [], conn = null, dc = null, sending = false, batchDone = false;
+  const drop = $('drop'), inp = $('inp'), dinp = $('dinp');
+  $('pf').onclick = () => { if (!sending) inp.click(); };
+  $('pd').onclick = () => { if (!sending) dinp.click(); };
   drop.ondragover = e => { e.preventDefault(); if (!sending) drop.classList.add('over'); };
   drop.ondragleave = () => drop.classList.remove('over');
-  drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); if (!sending) addFiles(e.dataTransfer.files); };
-  inp.onchange = () => { addFiles(inp.files); inp.value = ''; };
+  drop.ondrop = async e => {
+    e.preventDefault(); drop.classList.remove('over');
+    if (sending) return;
+    setStatus('status', 'Files/folder padh rahe hain…', 'wait');
+    try { addEntries(await entriesFromDrop(e.dataTransfer)); }
+    catch (x) { setStatus('status', 'Ye folder padh nahi paaye. "📁 Folder chuno" button se try karo.', 'err'); }
+  };
+  inp.onchange = () => { addEntries([...inp.files].map(f => ({ file: f, path: f.name }))); inp.value = ''; };
+  dinp.onchange = () => { addEntries([...dinp.files].map(f => ({ file: f, path: f.webkitRelativePath || f.name }))); dinp.value = ''; };
 
-  function addFiles(fl) {
-    if (batchDone) { files = []; batchDone = false; setStatus('status', ''); }  // new batch: don't resend old files
-    for (const f of fl) files.push(f);
+  function totals() {
+    return { count: groups.reduce((s, g) => s + g.files.length, 0), size: groups.reduce((s, g) => s + g.size, 0) };
+  }
+
+  function addEntries(list) {
+    if (!list.length) { setStatus('status', ''); return; }
+    if (batchDone) { groups = []; batchDone = false; }  // new batch: don't resend old files
+    for (const en of list) {
+      const slash = en.path.indexOf('/');
+      if (slash > 0) {
+        const top = en.path.slice(0, slash);
+        let g = groups.find(x => x.kind === 'folder' && x.name === top);
+        if (!g) { g = { kind: 'folder', name: top, files: [], size: 0 }; groups.push(g); }
+        g.files.push(en); g.size += en.file.size;
+      } else {
+        groups.push({ kind: 'file', name: en.path, files: [en], size: en.file.size });
+      }
+    }
+    setStatus('status', conn ? 'Receiver juda hua hai. Wo "Start Download" dabayega toh transfer shuru hoga.' : 'Ab code ya link receiver ko bhejo.');
     render(); sendList();
   }
-  window.removeFile = i => { if (sending) return; files.splice(i, 1); render(); sendList(); };
+  window.removeGroup = i => { if (sending) return; groups.splice(i, 1); render(); sendList(); };
 
   function render() {
-    $('list').innerHTML = files.map((f, i) => `
-      <div class="item"><b>${esc(f.name)}</b> <span class="small">(${fmt(f.size)})</span>
-        ${sending || batchDone ? '' : `<a href="#" onclick="removeFile(${i});return false" class="small" style="float:right;color:#fca5a5">✖ hatao</a>`}
-        <div class="bar"><div class="fill" id="sf${i}" ${batchDone ? 'style="width:100%"' : ''}></div></div>
-        <div class="small" id="ss${i}">${batchDone ? '<span class="ok">✅ Bhej diya</span>'
-          : conn ? 'Receiver ke "Start" ka intezaar' : 'Receiver ke connect hone ka intezaar'}</div></div>`).join('');
+    $('list').innerHTML = groups.map((g, i) => `
+      <div class="row">
+        ${fileIcon(g.name, g.kind)}
+        <div class="rbody">
+          <div class="name" title="${esc(g.name)}">${esc(g.name)}</div>
+          <div class="bar"><div class="fill ${batchDone ? 'done' : ''}" id="sf${i}" ${batchDone ? 'style="width:100%"' : ''}></div></div>
+          <div class="small" id="ss${i}">${g.kind === 'folder' ? g.files.length + ' files • ' : ''}${fmt(g.size)}${batchDone ? ' • <span class="ok">Bhej diya</span>' : ''}</div>
+        </div>
+        ${sending || batchDone ? '' : `<button class="x" title="Hatao" aria-label="Hatao ${esc(g.name)}" onclick="removeGroup(${i})">✕</button>`}
+      </div>`).join('');
+    const t = totals();
+    $('total').innerHTML = totalLine(t.count, t.size);
     drop.classList.toggle('off', sending);
+    $('pf').disabled = $('pd').disabled = sending;
   }
 
   function sendList() {
-    if (dc && dc.readyState === 'open' && !sending)
-      dc.send(JSON.stringify({ t: 'list', files: files.map(f => ({ name: f.name, size: f.size })) }));
+    if (!(dc && dc.readyState === 'open') || sending) return;
+    const summary = groups.map(g => ({ kind: g.kind, name: g.name, count: g.files.length, size: g.size }));
+    if (!summary.length) { dc.send(JSON.stringify({ t: 'list', groups: [], first: true, more: false })); return; }
+    for (let s = 0; s < summary.length; s += LIST_SLICE)
+      dc.send(JSON.stringify({ t: 'list', groups: summary.slice(s, s + LIST_SLICE), first: s === 0, more: s + LIST_SLICE < summary.length }));
   }
 
   function drain() {
@@ -1221,47 +1488,62 @@ function initSender() {
   }
 
   async function sendAll() {
-    if (sending || !files.length) return;
+    if (sending || !groups.length) return;
     sending = true; render(); keepAwake(true);
-    setStatus('status', '🚀 Bhej rahe hain… is tab ko band mat karna.', 'wait');
+    setConn('busy', 'File le raha hai');
+    setStatus('pstatus', 'Transfer chal raha hai. Ye tab band mat karna.');
+    setStatus('status', '');
     const pc = conn.peerConnection;
     const maxMsg = (pc && pc.sctp && pc.sctp.maxMessageSize) || 65536;
     const CH = Math.max(16384, Math.min(65536, maxMsg));
+    const all = totals(), tAll = Date.now(); let allSent = 0;
     try {
-      for (let i = 0; i < files.length; i++) {
-        const f = files[i], t0 = Date.now(); let sent = 0, lastUi = 0;
-        dc.send(JSON.stringify({ t: 'file', i, name: f.name, size: f.size, type: f.type }));
-        for (let off = 0; off < f.size; off += READ_BLOCK) {
-          const buf = await f.slice(off, off + READ_BLOCK).arrayBuffer();
-          for (let p = 0; p < buf.byteLength; p += CH) {
-            await drain();
-            if (dc.readyState !== 'open') throw new Error('closed');
-            dc.send(buf.slice(p, p + CH));
+      for (let gi = 0; gi < groups.length; gi++) {
+        const g = groups[gi], t0 = Date.now(); let gsent = 0, lastUi = 0;
+        for (let fi = 0; fi < g.files.length; fi++) {
+          const { file: f, path } = g.files[fi];
+          dc.send(JSON.stringify({ t: 'file', g: gi, path, size: f.size, type: f.type }));
+          for (let off = 0; off < f.size; off += READ_BLOCK) {
+            const buf = await f.slice(off, off + READ_BLOCK).arrayBuffer();
+            for (let p = 0; p < buf.byteLength; p += CH) {
+              await drain();
+              if (dc.readyState !== 'open') throw new Error('closed');
+              dc.send(buf.slice(p, p + CH));
+            }
+            gsent += buf.byteLength; allSent += buf.byteLength;
+            if (Date.now() - lastUi > 250) {
+              lastUi = Date.now();
+              $('sf' + gi).style.width = pct(gsent, g.size) + '%';
+              setStatus('ss' + gi, (g.kind === 'folder' ? `File ${fi + 1}/${g.files.length} • ` : '') + progressText(gsent, g.size, t0));
+              $('total').innerHTML = totalLine(all.count, all.size, allSent, tAll);
+            }
           }
-          sent += buf.byteLength;
-          if (Date.now() - lastUi > 250) {
-            lastUi = Date.now();
-            $('sf' + i).style.width = (sent / f.size * 100) + '%';
-            setStatus('ss' + i, progressText(sent, f.size, t0));
-          }
+          if (dc.readyState !== 'open') throw new Error('closed');
+          dc.send(JSON.stringify({ t: 'end' }));
         }
-        dc.send(JSON.stringify({ t: 'end', i }));
-        $('sf' + i).style.width = '100%';
-        setStatus('ss' + i, '✅ Bhej diya — receiver save kar raha hai', 'ok');
+        dc.send(JSON.stringify({ t: 'gend', g: gi }));
+        $('sf' + gi).style.width = '100%'; $('sf' + gi).classList.add('done');
+        setStatus('ss' + gi, (g.kind === 'folder' ? g.files.length + ' files • ' : '') + fmt(g.size) + ' • <span class="ok">Bhej diya</span>');
       }
       dc.send(JSON.stringify({ t: 'done' }));
       batchDone = true;
-      setStatus('status', '🎉 Saari files bhej di gayi! Aur files bhejne ke liye upar se add karo.', 'ok');
+      setConn('connected', 'Sab mil gaya');
+      setStatus('pstatus', 'Transfer poora ho gaya.');
+      setStatus('status', '🎉 Sab kuch bhej diya! Aur bhejna ho toh nayi files ya folder chuno.', 'ok');
     } catch (e) {
-      setStatus('status', '❌ Transfer beech mein ruk gaya — receiver disconnect ho gaya. Receiver link dobara khol kar Start kare.', 'err');
+      setConn('error', 'Beech mein toot gaya');
+      setStatus('pstatus', 'Receiver disconnect ho gaya.');
+      setStatus('status', 'Transfer beech mein ruk gaya. Receiver link dobara khol kar "Start Download" dabaye.', 'err');
     }
     sending = false; keepAwake(false); render();
   }
 
-  if (typeof Peer === 'undefined') { setStatus('pstatus', '❌ Transfer system load nahi hua. Internet check karke refresh karo.', 'err'); return; }
+  if (typeof Peer === 'undefined') {
+    setConn('error'); setStatus('pstatus', 'Transfer system load nahi hua. Internet check karke page refresh karo.', 'err'); return;
+  }
   const peer = new Peer(PREFIX + CODE.toLowerCase(), OPTS);
-  peer.on('open', () => setStatus('pstatus', '✅ Ready! Receiver ko code ya link bhejo. Is page ko khula rakho.', 'ok'));
-  peer.on('error', err => { if (err.type !== 'peer-unavailable') setStatus('pstatus', '❌ ' + peerErrorText(err), 'err'); });
+  peer.on('open', () => { if (!conn) { setConn('ready', 'Code ka intezaar'); setStatus('pstatus', 'Ready! Receiver ko code ya link bhejo aur ye page khula rakho.'); } });
+  peer.on('error', err => { if (err.type !== 'peer-unavailable') { setConn('error'); setStatus('pstatus', peerErrorText(err), 'err'); } });
   peer.on('disconnected', () => { setTimeout(() => { if (!peer.destroyed && peer.disconnected) peer.reconnect(); }, 2000); });
   peer.on('connection', c => {
     if (conn && conn.open) {
@@ -1278,82 +1560,127 @@ function initSender() {
         let m; try { m = JSON.parse(e.data); } catch (x) { return; }
         if (m.t === 'start') sendAll();
       });
-      setStatus('status', '🔗 Receiver connect ho gaya! ' + (files.length ? 'Wo "Start" dabayega toh transfer shuru hoga.' : 'Ab files add karo.'), 'ok');
+      setConn('connected', 'Jud gaya');
+      setStatus('pstatus', groups.length ? 'Receiver jud gaya. Wo "Start Download" dabayega toh transfer shuru hoga.' : 'Receiver jud gaya. Ab files ya folder chuno.');
       render(); sendList();
     });
     c.on('close', () => {
       if (conn !== c) return;
       conn = null; dc = null;
-      if (!sending) setStatus('status', 'Receiver disconnect ho gaya. Wo link dobara khol sakta hai.', 'wait');
+      if (!sending) { setConn('ready', 'Disconnect ho gaya'); setStatus('pstatus', 'Receiver chala gaya. Wo link dobara khol sakta hai.'); }
       render();
     });
-    watchIce(c, () => { if (conn === c) setStatus('status', '❌ ' + ICE_FAIL_TEXT, 'err'); });
+    watchIce(c, () => { if (conn === c) { setConn('error', 'Connect nahi ho paaya'); setStatus('pstatus', ICE_FAIL_TEXT, 'err'); } });
   });
 }
 
 /* ============================ RECEIVER ============================ */
 function initReceiver() {
   app.innerHTML = `
-    <div class="box">
-      <div class="small">Code</div>
-      <div class="code">${esc(CODE)}</div>
-      <div id="rstatus" class="small wait">⏳ Sender se connect ho rahe hain…</div>
+    <div class="panel" id="conn" data-state="wait">
+      <div class="linkrow">
+        <div class="dev"><div class="ic" id="themic">⌛</div><div><b>Sender</b><span id="themsub">Dhoondh rahe hain…</span></div></div>
+        <div class="wire"></div>
+        <div class="dev me right"><div class="ic">💻</div><div><b>Aap</b><span>Code ${esc(CODE)}</span></div></div>
+      </div>
+      <div class="state"><span class="dot"></span><span id="rstatus">Sender se connect ho rahe hain…</span></div>
     </div>
-    <div id="list"></div>
-    <button id="start" class="btn" style="display:none">⬇️ Start Download</button>
-    <div id="status" class="small" style="margin-top:10px"></div>`;
+    <div id="list" class="rows"></div>
+    <div id="total" class="total"></div>
+    <button id="start" class="btn big" style="display:none">⬇️ Start Download</button>
+    <div id="status" class="msg"></div>`;
 
-  let offered = [], cur = null, finished = false, started = false;
+  let offered = [], incoming = [], cur = null, gstate = {}, zips = {}, finished = false, started = false;
+  let allGot = 0, tAll = 0;
+
+  function totals() {
+    return { count: offered.reduce((s, g) => s + g.count, 0), size: offered.reduce((s, g) => s + g.size, 0) };
+  }
 
   function renderList() {
-    $('list').innerHTML = offered.map((f, i) => `
-      <div class="item"><b>${esc(f.name)}</b> <span class="small">(${fmt(f.size)})</span>
-        <div class="bar"><div class="fill" id="rf${i}"></div></div>
-        <div class="small" id="rs${i}">Ready</div></div>`).join('');
+    $('list').innerHTML = offered.map((g, i) => `
+      <div class="row">
+        ${fileIcon(g.name, g.kind)}
+        <div class="rbody">
+          <div class="name" title="${esc(g.name)}">${esc(g.name)}${g.kind === 'folder' ? '<span class="small"> → ' + esc(g.name) + '.zip</span>' : ''}</div>
+          <div class="bar"><div class="fill" id="rf${i}"></div></div>
+          <div class="small" id="rs${i}">${g.kind === 'folder' ? g.count + ' files • ' : ''}${fmt(g.size)}</div>
+        </div>
+      </div>`).join('');
+    const t = totals();
+    $('total').innerHTML = totalLine(t.count, t.size);
     updateButton();
   }
 
   function updateButton() {
-    const total = offered.reduce((s, f) => s + f.size, 0);
+    const t = totals();
     const btn = $('start');
-    btn.style.display = offered.length ? '' : 'none';
+    btn.style.display = offered.length && !finished ? '' : 'none';
     btn.disabled = started || finished;
     btn.textContent = finished ? '✅ Download ho gaya'
-      : `⬇️ Start Download • ${offered.length} file(s) • ${fmt(total)}`;
+      : started ? '⏳ Download ho raha hai…'
+      : `⬇️ Start Download (${fmt(t.size)})`;
+  }
+
+  function saveBlob(g, blob, name) {
+    const url = URL.createObjectURL(blob);
+    const fill = $('rf' + g); fill.style.width = '100%'; fill.classList.add('done');
+    const o = offered[g];
+    setStatus('rs' + g, `${o && o.kind === 'folder' ? o.count + ' files • ' : ''}${fmt(blob.size)} • <span class="ok">Aa gaya</span><br>` +
+      `<a class="save" id="sv${g}" href="${url}" download="${esc(name)}">💾 Save ${esc(name)}</a>`);
+    try { $('sv' + g).click(); } catch (e) {}
   }
 
   function finishFile() {
     if (cur.pending.length) cur.parts.push(new Blob(cur.pending));
-    const blob = new Blob(cur.parts, { type: cur.type || 'application/octet-stream' });
-    const url = URL.createObjectURL(blob);
-    const i = cur.i, name = cur.name;
-    $('rf' + i).style.width = '100%';
-    setStatus('rs' + i, `<span class="ok">✅ Aa gayi!</span> <a class="save" id="sv${i}" href="${url}" download="${esc(name)}">💾 Save ${esc(name)}</a>`);
-    try { $('sv' + i).click(); } catch (e) {}
+    const g = offered[cur.g];
+    if (g && g.kind === 'folder') {
+      (zips[cur.g] = zips[cur.g] || new ZipBuilder()).add(cur.path, cur.got, cur.crc, cur.parts);
+    } else {
+      saveBlob(cur.g, new Blob(cur.parts, { type: cur.type || 'application/octet-stream' }), cur.path.split('/').pop());
+    }
     cur = null;
   }
 
-  if (typeof Peer === 'undefined') { setStatus('rstatus', '❌ Transfer system load nahi hua. Internet check karke refresh karo.', 'err'); return; }
+  function finishGroup(gi) {
+    const g = offered[gi];
+    if (!g || g.kind !== 'folder') return;
+    setStatus('rs' + gi, 'ZIP bana rahe hain…', 'wait');
+    const zip = zips[gi] || new ZipBuilder();
+    delete zips[gi];
+    saveBlob(gi, zip.finish(), g.name + '.zip');
+  }
+
+  if (typeof Peer === 'undefined') {
+    setConn('error'); setStatus('rstatus', 'Transfer system load nahi hua. Internet check karke page refresh karo.', 'err'); return;
+  }
   const peer = new Peer(OPTS);
   let opened = false;
-  peer.on('error', err => { if (!finished) setStatus('rstatus', '❌ ' + peerErrorText(err), 'err'); });
+  peer.on('error', err => { if (!finished) { setConn('error', 'Nahi mila'); setStatus('rstatus', peerErrorText(err), 'err'); } });
   peer.on('disconnected', () => { setTimeout(() => { if (!peer.destroyed && peer.disconnected && !opened) peer.reconnect(); }, 2000); });
   peer.on('open', () => {
+    setConn('ready', 'Dhoondh rahe hain…');
     const conn = peer.connect(PREFIX + CODE.toLowerCase(), { reliable: true, serialization: 'raw' });
-    const timer = setTimeout(() => { if (!opened) setStatus('rstatus', '❌ Sender se connect nahi ho paaye. Check karo: code sahi hai? Sender ka page khula hai? ' + ICE_FAIL_TEXT, 'err'); }, 30000);
-    watchIce(conn, () => { if (!finished) setStatus('rstatus', '❌ ' + ICE_FAIL_TEXT, 'err'); });
+    const timer = setTimeout(() => {
+      if (!opened) { setConn('error', 'Nahi mila'); setStatus('rstatus', 'Sender se connect nahi ho paaye. Code sahi hai? Sender ka page khula hai? ' + ICE_FAIL_TEXT, 'err'); }
+    }, 30000);
+    watchIce(conn, () => { if (!finished) { setConn('error', 'Connect nahi ho paaya'); setStatus('rstatus', ICE_FAIL_TEXT, 'err'); } });
 
     conn.on('open', () => {
       opened = true; clearTimeout(timer);
       const dc = conn.dataChannel;
       dc.binaryType = 'arraybuffer';
-      setStatus('rstatus', '🔗 Sender se connect ho gaye! ' + 'Files ki list ka intezaar…', 'ok');
+      setConn('connected', 'Jud gaya');
+      setStatus('rstatus', 'Sender se jud gaye. Files ki list aa rahi hai…');
 
       $('start').onclick = () => {
         if (started || !offered.length) return;
-        started = true; updateButton(); keepAwake(true);
+        started = true; gstate = {}; zips = {}; allGot = 0; tAll = Date.now();
+        updateButton(); keepAwake(true);
         dc.send(JSON.stringify({ t: 'start' }));
-        setStatus('status', '⬇️ Files aa rahi hain… is tab ko band mat karna.', 'wait');
+        setConn('busy', 'Bhej raha hai');
+        setStatus('rstatus', 'Files aa rahi hain. Ye tab band mat karna.');
+        setStatus('status', '');
       };
 
       let lastUi = 0;
@@ -1361,25 +1688,48 @@ function initReceiver() {
         const d = e.data;
         if (typeof d === 'string') {
           let m; try { m = JSON.parse(d); } catch (x) { return; }
-          if (m.t === 'list') { offered = m.files; started = false; finished = false; renderList(); setStatus('rstatus', '🔗 Connected. ' + (offered.length ? 'Start dabao.' : 'Sender files add kar raha hai…'), 'ok'); }
-          else if (m.t === 'file') { cur = { i: m.i, name: m.name, size: m.size, type: m.type, got: 0, parts: [], pending: [], pendingBytes: 0, t0: Date.now() }; }
+          if (m.t === 'list') {
+            if (m.first) incoming = [];
+            incoming.push(...m.groups);
+            if (m.more) return;
+            offered = incoming; started = false; finished = false; renderList();
+            setConn('connected', 'Jud gaya');
+            setStatus('rstatus', offered.length ? 'Files taiyaar hain. "Start Download" dabao.' : 'Sender files chun raha hai…');
+          }
+          else if (m.t === 'file') {
+            const gs = gstate[m.g] = gstate[m.g] || { got: 0, n: 0, t0: Date.now() };
+            gs.n++;
+            cur = { g: m.g, path: m.path, size: m.size, type: m.type, got: 0, crc: 0, parts: [], pending: [], pendingBytes: 0,
+                    zip: !!(offered[m.g] && offered[m.g].kind === 'folder') };
+          }
           else if (m.t === 'end') { if (cur) finishFile(); }
-          else if (m.t === 'done') { finished = true; started = false; keepAwake(false); updateButton(); setStatus('status', '🎉 Saari files aa gayi! Agar download apne aap shuru na hua ho toh "Save" link dabao.', 'ok'); }
-          else if (m.t === 'busy') { setStatus('rstatus', '⚠️ Sender abhi kisi aur ko file bhej raha hai. Thodi der baad try karo.', 'err'); }
+          else if (m.t === 'gend') { finishGroup(m.g); }
+          else if (m.t === 'done') {
+            finished = true; started = false; keepAwake(false); updateButton();
+            const t = totals(); $('total').innerHTML = totalLine(t.count, t.size);
+            setConn('connected', 'Sab bhej diya');
+            setStatus('rstatus', 'Transfer poora ho gaya.');
+            setStatus('status', '🎉 Sab kuch aa gaya! Download apne aap shuru na hua ho toh "Save" link dabao.', 'ok');
+          }
+          else if (m.t === 'busy') { setConn('error', 'Busy hai'); setStatus('rstatus', 'Sender abhi kisi aur ko file bhej raha hai. Thodi der baad try karo.', 'err'); }
           return;
         }
         if (!cur) return;
-        cur.pending.push(d); cur.pendingBytes += d.byteLength; cur.got += d.byteLength;
+        if (cur.zip) cur.crc = crc32(cur.crc, d);
+        cur.pending.push(d); cur.pendingBytes += d.byteLength; cur.got += d.byteLength; allGot += d.byteLength;
         if (cur.pendingBytes >= FLUSH_BYTES) { cur.parts.push(new Blob(cur.pending)); cur.pending = []; cur.pendingBytes = 0; }
+        const gs = gstate[cur.g]; gs.got += d.byteLength;
         if (Date.now() - lastUi > 250) {
           lastUi = Date.now();
-          $('rf' + cur.i).style.width = (cur.got / cur.size * 100) + '%';
-          setStatus('rs' + cur.i, progressText(cur.got, cur.size, cur.t0));
+          const g = offered[cur.g] || { size: cur.size, count: 1, kind: 'file' };
+          $('rf' + cur.g).style.width = pct(gs.got, g.size) + '%';
+          setStatus('rs' + cur.g, (g.kind === 'folder' ? `File ${gs.n}/${g.count} • ` : '') + progressText(gs.got, g.size, gs.t0));
+          const t = totals(); $('total').innerHTML = totalLine(t.count, t.size, allGot, tAll);
         }
       });
     });
     conn.on('close', () => {
-      if (!finished) { keepAwake(false); setStatus('rstatus', '❌ Sender disconnect ho gaya. Sender ka page khula ho toh is page ko refresh karo.', 'err'); }
+      if (!finished) { keepAwake(false); setConn('error', 'Chala gaya'); setStatus('rstatus', 'Sender disconnect ho gaya. Sender ka page khula ho toh ye page refresh karo.', 'err'); }
     });
   });
 }
@@ -1392,7 +1742,7 @@ if (MODE === 'send') initSender(); else initReceiver();
 if conversion_type == P2P_TOOL:
     st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.subheader("Direct File Transfer")
-    st.markdown("AnyDesk ki tarah: file seedha aapke device se saamne wale ke device par jaati hai. "
+    st.markdown("AnyDesk ki tarah: files ya poora folder seedha aapke device se saamne wale ke device par jaata hai. "
                 "**Koi size limit nahi, koi account nahi, bilkul free.** Bas transfer ke waqt dono ka page khula hona chahiye.")
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -1407,10 +1757,10 @@ if conversion_type == P2P_TOOL:
     if p2p_mode == "📤 File Bhejna":
         if "p2p_code" not in st.session_state:
             st.session_state.p2p_code = new_p2p_code()
-        st.info("Kaise bhejein: (1) Files chuno, (2) code ya link receiver ko bhejo, (3) receiver 'Start' dabayega "
+        st.info("Kaise bhejein: (1) Files ya folder chuno, (2) code ya link receiver ko bhejo, (3) receiver 'Start' dabayega "
                 "aur file seedha uske paas pahunch jaayegi. Transfer poora hone tak ye page khula rakho aur upar ka option mat badlo.",
                 icon="💡")
-        components.html(build_p2p_html("send", st.session_state.p2p_code), height=760, scrolling=True)
+        components.html(build_p2p_html("send", st.session_state.p2p_code), height=820, scrolling=True)
         if st.button("🔄 New Code"):
             st.session_state.p2p_code = new_p2p_code()
             st.rerun()
@@ -1420,13 +1770,16 @@ if conversion_type == P2P_TOOL:
         if len(code) == 6:
             st.info("Sender ka page khula hona chahiye. Connect hone par files ki list dikhegi, phir 'Start Download' dabao. "
                     "Transfer poora hone tak ye page khula rakho.")
-            components.html(build_p2p_html("receive", code), height=640, scrolling=True)
+            components.html(build_p2p_html("receive", code), height=660, scrolling=True)
         elif code:
             st.warning("Code poore 6 akshar ka hona chahiye.")
 
     with st.expander("ℹ️ Kaam kaise karta hai / problem aaye toh"):
         st.markdown(
             "- File kisi server par **save nahi hoti**. Seedha ek browser se doosre browser mein jaati hai (WebRTC, encrypted).\n"
+            "- **Folder** bhejoge toh receiver ko woh ek **ZIP file** mein milega, andar saare sub-folder waise hi rahenge. "
+            "ZIP par right-click → Extract karke folder wapas mil jaayega.\n"
+            "- Folder chunna laptop/desktop browser par chalta hai. Mobile par 'Files chuno' use karo.\n"
             "- Badi files (kai GB) ke liye **Chrome ya Edge, laptop/desktop par** sabse achha chalta hai.\n"
             "- Speed dono taraf ke internet par depend karti hai. Ek hi WiFi par ho toh bahut tez chalti hai.\n"
             "- Connect na ho toh: dono page refresh karo, naya code banao, ya network badal kar dekho "
