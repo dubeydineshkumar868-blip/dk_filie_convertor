@@ -1,12 +1,16 @@
 import os
 import sys
 import zipfile
+import uuid
+import json
+import secrets
 # Set UTF-8 encoding environment variables to fix UnicodeEncodeError
 os.environ['PYTHONIOENCODING'] = 'utf-8'
 os.environ['PYTHONUTF8'] = '1'
 # Set EasyOCR environment variable first to avoid home directory access
 os.environ['EASYOCR_MODULE_PATH'] = os.path.join(os.getcwd(), '.easyocr_models')
 import streamlit as st
+import streamlit.components.v1 as components
 from PIL import Image
 import fitz  # PyMuPDF
 from pdf2docx import Converter
@@ -370,6 +374,28 @@ st.markdown("""
         font-size: 2rem;
         font-weight: 900;
     }
+
+    /* Alert boxes (st.info / success / warning / error): dark background so the
+       white text stays readable in both light and dark browser themes */
+    [data-testid="stAlertContainer"] {
+        background: rgba(99, 102, 241, 0.22) !important;
+        border: 1px solid #6366f1 !important;
+        border-radius: 12px !important;
+    }
+    [data-testid="stAlertContainer"]:has([data-testid="stAlertContentSuccess"]) {
+        background: rgba(16, 185, 129, 0.2) !important; border-color: #10b981 !important;
+    }
+    [data-testid="stAlertContainer"]:has([data-testid="stAlertContentWarning"]) {
+        background: rgba(245, 158, 11, 0.2) !important; border-color: #f59e0b !important;
+    }
+    [data-testid="stAlertContainer"]:has([data-testid="stAlertContentError"]) {
+        background: rgba(239, 68, 68, 0.2) !important; border-color: #ef4444 !important;
+    }
+    [data-testid="stAlertContainer"] p,
+    [data-testid="stAlertContainer"] span,
+    [data-testid="stAlertContainer"] div {
+        color: #f8fafc !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -381,13 +407,26 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
+P2P_TOOL = "🤝 Direct File Transfer (Free)"
+CLOUD_TOOL = "📤 Large File Transfer (Cloud)"
+
+def r2_is_configured():
+    """Checks whether Cloudflare R2 credentials exist in Streamlit secrets."""
+    try:
+        cfg = st.secrets["r2"]
+        return all(k in cfg for k in ("account_id", "access_key_id", "secret_access_key", "bucket"))
+    except Exception:
+        return False
+
 # Sidebar for navigation with icons
 st.sidebar.title("📋 Tools")
-conversion_type = st.sidebar.selectbox(
-    "Select what you want to do:",
-    [
+tool_options = [P2P_TOOL]
+if r2_is_configured():  # cloud transfer only shows up once R2 keys are added in Secrets
+    tool_options.append(CLOUD_TOOL)
+tool_options += [
         "🖼️ Image to PDF",
         "🖼️ Image to Word",
+        "🔁 WebP Converter",
         "📝 Image to Editable Text (OCR)",
         "📄 PDF to Image", 
         "📝 PDF to Word", 
@@ -397,7 +436,9 @@ conversion_type = st.sidebar.selectbox(
         "🔽 Compress PDF",
         "🧹 Remove Watermark from Images"
     ]
-)
+
+# Direct Transfer is the first option, so a shared ?receive=CODE link lands on it directly
+conversion_type = st.sidebar.selectbox("Select what you want to do:", tool_options)
 
 # Helper functions for conversion
 def image_to_pdf(uploaded_files):
@@ -595,6 +636,41 @@ def compress_image(uploaded_image, quality=85):
     
     return compressed_buffer
 
+def convert_image_format(image_bytes, target="WEBP", quality=85, lossless=False):
+    """
+    Converts image bytes to another format (WEBP, JPEG or PNG).
+    - Transparency is kept for WEBP/PNG; for JPEG it is placed on a white background.
+    - Animated images (GIF / animated WebP) stay animated when converting to WEBP.
+    Returns the converted image bytes.
+    """
+    img = Image.open(io.BytesIO(image_bytes))
+    out = io.BytesIO()
+
+    if target == "WEBP":
+        if getattr(img, "is_animated", False):
+            img.save(out, format="WEBP", save_all=True, quality=quality, lossless=lossless)
+        else:
+            if img.mode not in ("RGB", "RGBA"):
+                img = img.convert("RGBA" if "transparency" in img.info or img.mode in ("LA", "P") else "RGB")
+            img.save(out, format="WEBP", quality=quality, lossless=lossless, method=6)
+
+    elif target == "JPEG":
+        if img.mode in ("RGBA", "LA", "P"):
+            img = img.convert("RGBA")
+            background = Image.new("RGB", img.size, (255, 255, 255))
+            background.paste(img, mask=img.split()[-1])
+            img = background
+        elif img.mode != "RGB":
+            img = img.convert("RGB")
+        img.save(out, format="JPEG", quality=quality, optimize=True)
+
+    else:  # PNG
+        if img.mode not in ("RGB", "RGBA", "L", "LA", "P"):
+            img = img.convert("RGBA")
+        img.save(out, format="PNG", optimize=True)
+
+    return out.getvalue()
+
 def compress_pdf(uploaded_pdf, quality='medium'):
     """
     Compresses a PDF file with maximum compression by reducing image quality and size.
@@ -757,8 +833,660 @@ def get_file_size(file_obj):
             return f"{size:.2f} {unit}"
         size /= 1024.0
 
+# ---------------------------------------------------------------------------
+# Large File Transfer (WeTransfer style) - files go browser -> Cloudflare R2
+# directly, so Streamlit's upload limit and RAM are never touched.
+# ---------------------------------------------------------------------------
+TRANSFER_MAX_FILES = 10          # files per transfer
+TRANSFER_UPLOAD_WINDOW = 6 * 3600  # upload URL valid for 6 hours
+
+def get_r2_client():
+    """Creates an S3-compatible client pointing at Cloudflare R2."""
+    import boto3
+    from botocore.config import Config
+    cfg = st.secrets["r2"]
+    client = boto3.client(
+        "s3",
+        endpoint_url=f"https://{cfg['account_id']}.r2.cloudflarestorage.com",
+        aws_access_key_id=cfg["access_key_id"],
+        aws_secret_access_key=cfg["secret_access_key"],
+        region_name="auto",
+        config=Config(signature_version="s3v4"),
+    )
+    return client, cfg["bucket"]
+
+def make_transfer_slots(transfer_id, expiry_days, n=TRANSFER_MAX_FILES):
+    """
+    Generates n pairs of presigned URLs:
+      put -> browser uploads the file straight to R2
+      get -> shareable download link (valid for expiry_days, max 7)
+    """
+    client, bucket = get_r2_client()
+    slots = []
+    for i in range(n):
+        key = f"transfers/{transfer_id}/file_{i + 1}"
+        put_url = client.generate_presigned_url(
+            "put_object",
+            Params={"Bucket": bucket, "Key": key},
+            ExpiresIn=TRANSFER_UPLOAD_WINDOW,
+        )
+        get_url = client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": bucket, "Key": key},
+            ExpiresIn=expiry_days * 24 * 3600,
+        )
+        slots.append({"put": put_url, "get": get_url})
+    return slots
+
+TRANSFER_HTML = """
+<style>
+  body { margin:0; font-family: system-ui, -apple-system, Segoe UI, sans-serif; color:#fff; background:transparent; }
+  .drop { border:2px dashed #a78bfa; border-radius:16px; padding:30px 16px; text-align:center;
+          background:rgba(139,92,246,.12); cursor:pointer; transition:background .2s; }
+  .drop.over { background:rgba(236,72,153,.2); }
+  .drop b { font-size:17px; }
+  .btn { background:linear-gradient(135deg,#8b5cf6,#ec4899); color:#fff; border:none; border-radius:50px;
+         padding:12px 28px; font-weight:800; font-size:15px; cursor:pointer; margin-top:14px; letter-spacing:.5px; }
+  .btn:disabled { opacity:.45; cursor:not-allowed; }
+  .item { background:#1e293b; border-radius:12px; padding:12px 14px; margin-top:10px; border-left:4px solid #8b5cf6; }
+  .bar { height:8px; background:#334155; border-radius:8px; overflow:hidden; margin-top:8px; }
+  .fill { height:100%; width:0; background:linear-gradient(90deg,#8b5cf6,#ec4899); transition:width .2s; }
+  .small { font-size:13px; color:#cbd5e1; margin-top:4px; }
+  .ok { color:#6ee7b7; } .err { color:#fca5a5; }
+  a { color:#f9a8d4; word-break:break-all; }
+  textarea { width:100%; box-sizing:border-box; background:#0f172a; color:#fff; border:1px solid #a78bfa;
+             border-radius:8px; padding:8px; margin-top:10px; font-size:12px; }
+  h3 { margin:18px 0 4px; }
+</style>
+
+<div id="drop" class="drop">
+  📂 <b>Click karke files chuno</b> ya yahan drag &amp; drop karo<br>
+  <span class="small">Ek baar mein __MAXFILES__ files tak &bull; har file 5 GB tak</span>
+  <input id="inp" type="file" multiple style="display:none">
+</div>
+<div id="list"></div>
+<button id="go" class="btn" disabled>🚀 Upload &amp; Get Links</button>
+<div id="done"></div>
+
+<script>
+const SLOTS = __SLOTS__;
+const MAX_BYTES = 5 * 1024 * 1024 * 1024;
+let files = [];
+let busy = false;
+const drop = document.getElementById('drop');
+const inp  = document.getElementById('inp');
+const list = document.getElementById('list');
+const go   = document.getElementById('go');
+const done = document.getElementById('done');
+
+function fmt(b) { const u=['B','KB','MB','GB']; let i=0; while (b>=1024 && i<3) { b/=1024; i++; } return b.toFixed(i ? 2 : 0) + ' ' + u[i]; }
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+drop.onclick = () => { if (!busy) inp.click(); };
+drop.ondragover = e => { e.preventDefault(); if (!busy) drop.classList.add('over'); };
+drop.ondragleave = () => drop.classList.remove('over');
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); if (!busy) addFiles(e.dataTransfer.files); };
+inp.onchange = () => { addFiles(inp.files); inp.value = ''; };
+
+function addFiles(fl) {
+  for (const f of fl) {
+    if (files.length >= SLOTS.length) { alert('Ek transfer mein max ' + SLOTS.length + ' files. Baaki ke liye "New Transfer" karo.'); break; }
+    if (f.size > MAX_BYTES) { alert(f.name + ' 5 GB se badi hai. Ise chhote parts mein zip karke bhejo.'); continue; }
+    files.push(f);
+  }
+  render();
+}
+
+function render() {
+  list.innerHTML = files.map((f, i) =>
+    `<div class="item"><b>${esc(f.name)}</b> <span class="small">(${fmt(f.size)})</span>
+       <div class="bar"><div class="fill" id="fill${i}"></div></div>
+       <div class="small" id="st${i}">Ready</div></div>`).join('');
+  const total = files.reduce((s, f) => s + f.size, 0);
+  go.disabled = !files.length || busy;
+  go.textContent = files.length ? `🚀 Upload ${files.length} file(s) • ${fmt(total)}` : '🚀 Upload & Get Links';
+}
+
+function contentDisposition(name) {
+  const ascii = name.replace(/[^\\x20-\\x7E]/g, '_').replace(/["\\\\]/g, '');
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`;
+}
+
+function uploadOne(f, i) {
+  return new Promise(resolve => {
+    const fill = document.getElementById('fill' + i);
+    const st = document.getElementById('st' + i);
+    const x = new XMLHttpRequest();
+    x.open('PUT', SLOTS[i].put);
+    x.setRequestHeader('Content-Type', f.type || 'application/octet-stream');
+    x.setRequestHeader('Content-Disposition', contentDisposition(f.name));
+    const t0 = Date.now();
+    x.upload.onprogress = e => {
+      if (!e.lengthComputable) return;
+      const p = e.loaded / e.total * 100;
+      const secs = Math.max((Date.now() - t0) / 1000, 0.5);
+      const speed = e.loaded / secs;
+      const left = speed > 0 ? Math.round((e.total - e.loaded) / speed) : 0;
+      fill.style.width = p + '%';
+      st.textContent = `${p.toFixed(1)}% • ${fmt(e.loaded)} / ${fmt(e.total)} • ${fmt(speed)}/s • ~${left}s left`;
+    };
+    x.onload = () => {
+      if (x.status >= 200 && x.status < 300) {
+        fill.style.width = '100%';
+        st.innerHTML = '<span class="ok">✅ Uploaded</span>';
+        resolve({ ok: true, name: f.name, size: f.size, url: SLOTS[i].get });
+      } else {
+        st.innerHTML = `<span class="err">❌ Upload failed (HTTP ${x.status}). R2 keys/bucket check karo.</span>`;
+        resolve({ ok: false });
+      }
+    };
+    x.onerror = () => {
+      st.innerHTML = '<span class="err">❌ Network ya CORS error. R2 bucket ki CORS setting check karo.</span>';
+      resolve({ ok: false });
+    };
+    x.send(f);
+  });
+}
+
+go.onclick = async () => {
+  busy = true; go.disabled = true; drop.style.opacity = .5;
+  window.onbeforeunload = () => 'Upload chal raha hai!';
+  const results = [];
+  for (let i = 0; i < files.length; i++) {
+    const r = await uploadOne(files[i], i);
+    if (r.ok) results.push(r);
+  }
+  window.onbeforeunload = null;
+  go.textContent = '✔ Done';
+  showLinks(results);
+};
+
+function showLinks(results) {
+  if (!results.length) return;
+  let html = '<h3>✅ Aapke share links taiyaar hain</h3>';
+  results.forEach(r => {
+    html += `<div class="item"><b>${esc(r.name)}</b> <span class="small">(${fmt(r.size)})</span><br>
+             <a href="${esc(r.url)}" target="_blank">⬇️ Download link kholo</a></div>`;
+  });
+  const all = results.map(r => r.name + '\\n' + r.url).join('\\n\\n');
+  html += `<textarea id="all" rows="6" readonly>${esc(all)}</textarea>
+           <button class="btn" id="cp">📋 Copy All Links</button>`;
+  done.innerHTML = html;
+  document.getElementById('cp').onclick = () => {
+    const t = document.getElementById('all');
+    t.select();
+    try { navigator.clipboard.writeText(t.value); } catch (e) {}
+    try { document.execCommand('copy'); } catch (e) {}
+    document.getElementById('cp').textContent = '✅ Copied!';
+  };
+}
+</script>
+"""
+
+def build_transfer_html(slots):
+    return (TRANSFER_HTML
+            .replace("__SLOTS__", json.dumps(slots))
+            .replace("__MAXFILES__", str(len(slots))))
+
+# ---------------------------------------------------------------------------
+# Direct File Transfer (P2P, AnyDesk style) - the file goes straight from the
+# sender's browser to the receiver's browser over WebRTC. Nothing is stored on
+# any server, so there is no size limit and no cost. Both people must keep the
+# page open during the transfer. The free PeerJS cloud server is used only to
+# introduce the two browsers to each other.
+# ---------------------------------------------------------------------------
+PEERJS_SRC = "https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"
+P2P_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O/1/I confusion
+P2P_STUN_SERVERS = [
+    {"urls": "stun:stun.l.google.com:19302"},
+    {"urls": "stun:stun1.l.google.com:19302"},
+    {"urls": "stun:stun.cloudflare.com:3478"},
+]
+
+def new_p2p_code():
+    return "".join(secrets.choice(P2P_CODE_ALPHABET) for _ in range(6))
+
+def clean_p2p_code(raw):
+    return "".join(ch for ch in str(raw).upper() if ch in P2P_CODE_ALPHABET)[:6]
+
+def p2p_ice_servers():
+    """STUN servers, plus an optional TURN server from Secrets for strict networks."""
+    servers = list(P2P_STUN_SERVERS)
+    try:
+        t = st.secrets["turn"]
+        servers.append({"urls": t["urls"], "username": t["username"], "credential": t["credential"]})
+    except Exception:
+        pass
+    return servers
+
+def build_p2p_html(mode, code, peer_opts=None, peerjs_src=PEERJS_SRC):
+    opts = peer_opts if peer_opts is not None else {"debug": 1, "config": {"iceServers": p2p_ice_servers()}}
+    return (P2P_HTML
+            .replace("__PEERJS_SRC__", peerjs_src)
+            .replace("__MODE__", json.dumps(mode))
+            .replace("__CODE__", json.dumps(code))
+            .replace("__PEER_OPTS__", json.dumps(opts)))
+
+P2P_HTML = """
+<style>
+  body { margin:0; font-family: system-ui, -apple-system, Segoe UI, sans-serif; color:#fff; background:transparent; }
+  .box { background:#1e293b; border-radius:16px; padding:18px; border-left:5px solid #8b5cf6; margin-bottom:12px; }
+  .code { font-size:40px; font-weight:900; letter-spacing:10px; font-family:ui-monospace, Menlo, Consolas, monospace;
+          background:linear-gradient(135deg,#8b5cf6,#ec4899); -webkit-background-clip:text; background-clip:text;
+          color:transparent; margin:6px 0; }
+  .drop { border:2px dashed #a78bfa; border-radius:16px; padding:26px 16px; text-align:center;
+          background:rgba(139,92,246,.12); cursor:pointer; transition:background .2s; }
+  .drop.over { background:rgba(236,72,153,.2); }
+  .drop.off { opacity:.45; cursor:not-allowed; }
+  .btn { background:linear-gradient(135deg,#8b5cf6,#ec4899); color:#fff; border:none; border-radius:50px;
+         padding:11px 26px; font-weight:800; font-size:15px; cursor:pointer; margin-top:10px; }
+  .btn.sm { padding:7px 16px; font-size:13px; margin:6px 0 0; }
+  .btn:disabled { opacity:.45; cursor:not-allowed; }
+  .item { background:#0f172a; border-radius:12px; padding:11px 14px; margin-top:9px; border-left:4px solid #8b5cf6; }
+  .bar { height:8px; background:#334155; border-radius:8px; overflow:hidden; margin-top:8px; }
+  .fill { height:100%; width:0; background:linear-gradient(90deg,#8b5cf6,#ec4899); transition:width .2s; }
+  .small { font-size:13px; color:#cbd5e1; margin-top:4px; }
+  .ok { color:#6ee7b7; } .err { color:#fca5a5; } .wait { color:#fcd34d; }
+  input.link { width:100%; box-sizing:border-box; background:#0f172a; color:#fff; border:1px solid #a78bfa;
+               border-radius:8px; padding:8px; font-size:13px; margin-top:6px; }
+  a.save { color:#f9a8d4; font-weight:700; }
+</style>
+<div id="app"></div>
+<script src="__PEERJS_SRC__"></script>
+<script>
+  // backup CDN if the first one is blocked or down
+  if (typeof Peer === 'undefined')
+    document.write('<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"><\\/script>');
+</script>
+<script>
+const MODE = __MODE__, CODE = __CODE__, OPTS = __PEER_OPTS__;
+const PREFIX = 'dkft-';
+const READ_BLOCK = 1024 * 1024;          // read file 1 MB at a time
+const HIGH_WATER = 8 * 1024 * 1024;      // pause sending above 8 MB in buffer
+const LOW_WATER = 1024 * 1024;           // resume below 1 MB
+const FLUSH_BYTES = 16 * 1024 * 1024;    // receiver: pack chunks into a Blob every 16 MB
+const app = document.getElementById('app');
+const $ = id => document.getElementById(id);
+
+function fmt(b) { const u=['B','KB','MB','GB','TB']; let i=0; while (b>=1024 && i<4) { b/=1024; i++; } return b.toFixed(i ? 2 : 0) + ' ' + u[i]; }
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function eta(s) { s = Math.max(0, Math.round(s)); return s >= 3600 ? Math.floor(s/3600)+'h '+Math.floor(s%3600/60)+'m' : s >= 60 ? Math.floor(s/60)+'m '+(s%60)+'s' : s+'s'; }
+function setStatus(id, html, cls) { const el = $(id); if (el) el.innerHTML = cls ? `<span class="${cls}">${html}</span>` : html; }
+function progressText(done, total, t0) {
+  const secs = Math.max((Date.now() - t0) / 1000, 0.5), speed = done / secs;
+  const left = speed > 0 ? (total - done) / speed : 0;
+  return `${(total ? done/total*100 : 100).toFixed(1)}% • ${fmt(done)} / ${fmt(total)} • ${fmt(speed)}/s • ~${eta(left)} baaki`;
+}
+let wakeLock = null;
+async function keepAwake(on) {
+  try {
+    if (on && !wakeLock && navigator.wakeLock) wakeLock = await navigator.wakeLock.request('screen');
+    if (!on && wakeLock) { await wakeLock.release(); wakeLock = null; }
+  } catch (e) {}
+}
+function copyText(text, btn) {
+  try { navigator.clipboard.writeText(text); } catch (e) {}
+  const t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select();
+  try { document.execCommand('copy'); } catch (e) {}
+  t.remove(); btn.textContent = '✅ Copied!'; setTimeout(() => btn.textContent = '📋 Copy', 2000);
+}
+function shareUrl() {
+  for (const w of [window.top, window.parent]) {
+    try {
+      const u = new URL(w.location.href);
+      if (!u.protocol.startsWith('http')) continue;
+      u.search = ''; u.hash = ''; u.pathname = u.pathname.replace(/\\/~\\/\\+\\/?$/, '/');
+      u.searchParams.set('receive', CODE);
+      return u.toString();
+    } catch (e) {}
+  }
+  return '';
+}
+function peerErrorText(err) {
+  const t = err && err.type;
+  if (t === 'unavailable-id') return 'Ye code abhi busy hai. Neeche "New Code" dabao.';
+  if (t === 'peer-unavailable') return 'Is code par koi sender nahi mila. Code check karo aur sender ka page khula ho.';
+  if (t === 'network' || t === 'server-error' || t === 'socket-error' || t === 'socket-closed')
+    return 'Connection server tak nahi pahunch paaye. Internet check karke page refresh karo.';
+  if (t === 'browser-incompatible') return 'Ye browser support nahi karta. Chrome ya Edge use karo.';
+  return 'Error: ' + esc((err && (err.message || err.type)) || err);
+}
+function watchIce(conn, onFail) {
+  const pc = conn.peerConnection;
+  if (!pc) return;
+  pc.addEventListener('iceconnectionstatechange', () => { if (pc.iceConnectionState === 'failed') onFail(); });
+}
+const ICE_FAIL_TEXT = 'Dono devices aapas mein connect nahi ho paaye (network strict hai). ' +
+  'Dono ek hi WiFi par try karo, ya mobile hotspot badal kar dekho.';
+
+/* ============================ SENDER ============================ */
+function initSender() {
+  app.innerHTML = `
+    <div class="box">
+      <div class="small">Aapka transfer code</div>
+      <div class="code">${esc(CODE)}</div>
+      <div id="pstatus" class="small wait">⏳ Ready ho raha hai…</div>
+      <div id="linkwrap" style="display:none">
+        <div class="small" style="margin-top:10px">Ye link receiver ko bhejo (WhatsApp, email kahin bhi):</div>
+        <input id="link" class="link" readonly>
+        <button id="cpl" class="btn sm">📋 Copy</button>
+      </div>
+    </div>
+    <div id="drop" class="drop">📂 <b>Click karke files chuno</b> ya yahan drag &amp; drop karo<br>
+      <span class="small">Koi size limit nahi &bull; files kisi server par save nahi hoti</span></div>
+    <input id="inp" type="file" multiple style="display:none">
+    <div id="list"></div>
+    <div id="status" class="small" style="margin-top:10px"></div>`;
+
+  const url = shareUrl();
+  if (url) { $('link').value = url; $('linkwrap').style.display = ''; $('cpl').onclick = () => copyText(url, $('cpl')); }
+
+  let files = [], conn = null, dc = null, sending = false, batchDone = false;
+  const drop = $('drop'), inp = $('inp');
+  drop.onclick = () => { if (!sending) inp.click(); };
+  drop.ondragover = e => { e.preventDefault(); if (!sending) drop.classList.add('over'); };
+  drop.ondragleave = () => drop.classList.remove('over');
+  drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); if (!sending) addFiles(e.dataTransfer.files); };
+  inp.onchange = () => { addFiles(inp.files); inp.value = ''; };
+
+  function addFiles(fl) {
+    if (batchDone) { files = []; batchDone = false; setStatus('status', ''); }  // new batch: don't resend old files
+    for (const f of fl) files.push(f);
+    render(); sendList();
+  }
+  window.removeFile = i => { if (sending) return; files.splice(i, 1); render(); sendList(); };
+
+  function render() {
+    $('list').innerHTML = files.map((f, i) => `
+      <div class="item"><b>${esc(f.name)}</b> <span class="small">(${fmt(f.size)})</span>
+        ${sending || batchDone ? '' : `<a href="#" onclick="removeFile(${i});return false" class="small" style="float:right;color:#fca5a5">✖ hatao</a>`}
+        <div class="bar"><div class="fill" id="sf${i}" ${batchDone ? 'style="width:100%"' : ''}></div></div>
+        <div class="small" id="ss${i}">${batchDone ? '<span class="ok">✅ Bhej diya</span>'
+          : conn ? 'Receiver ke "Start" ka intezaar' : 'Receiver ke connect hone ka intezaar'}</div></div>`).join('');
+    drop.classList.toggle('off', sending);
+  }
+
+  function sendList() {
+    if (dc && dc.readyState === 'open' && !sending)
+      dc.send(JSON.stringify({ t: 'list', files: files.map(f => ({ name: f.name, size: f.size })) }));
+  }
+
+  function drain() {
+    if (dc.bufferedAmount < HIGH_WATER) return Promise.resolve();
+    return new Promise((res, rej) => {
+      const ok = () => { cleanup(); res(); }, bad = () => { cleanup(); rej(new Error('closed')); };
+      const cleanup = () => { dc.removeEventListener('bufferedamountlow', ok); dc.removeEventListener('close', bad); };
+      dc.addEventListener('bufferedamountlow', ok); dc.addEventListener('close', bad);
+    });
+  }
+
+  async function sendAll() {
+    if (sending || !files.length) return;
+    sending = true; render(); keepAwake(true);
+    setStatus('status', '🚀 Bhej rahe hain… is tab ko band mat karna.', 'wait');
+    const pc = conn.peerConnection;
+    const maxMsg = (pc && pc.sctp && pc.sctp.maxMessageSize) || 65536;
+    const CH = Math.max(16384, Math.min(65536, maxMsg));
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i], t0 = Date.now(); let sent = 0, lastUi = 0;
+        dc.send(JSON.stringify({ t: 'file', i, name: f.name, size: f.size, type: f.type }));
+        for (let off = 0; off < f.size; off += READ_BLOCK) {
+          const buf = await f.slice(off, off + READ_BLOCK).arrayBuffer();
+          for (let p = 0; p < buf.byteLength; p += CH) {
+            await drain();
+            if (dc.readyState !== 'open') throw new Error('closed');
+            dc.send(buf.slice(p, p + CH));
+          }
+          sent += buf.byteLength;
+          if (Date.now() - lastUi > 250) {
+            lastUi = Date.now();
+            $('sf' + i).style.width = (sent / f.size * 100) + '%';
+            setStatus('ss' + i, progressText(sent, f.size, t0));
+          }
+        }
+        dc.send(JSON.stringify({ t: 'end', i }));
+        $('sf' + i).style.width = '100%';
+        setStatus('ss' + i, '✅ Bhej diya — receiver save kar raha hai', 'ok');
+      }
+      dc.send(JSON.stringify({ t: 'done' }));
+      batchDone = true;
+      setStatus('status', '🎉 Saari files bhej di gayi! Aur files bhejne ke liye upar se add karo.', 'ok');
+    } catch (e) {
+      setStatus('status', '❌ Transfer beech mein ruk gaya — receiver disconnect ho gaya. Receiver link dobara khol kar Start kare.', 'err');
+    }
+    sending = false; keepAwake(false); render();
+  }
+
+  if (typeof Peer === 'undefined') { setStatus('pstatus', '❌ Transfer system load nahi hua. Internet check karke refresh karo.', 'err'); return; }
+  const peer = new Peer(PREFIX + CODE.toLowerCase(), OPTS);
+  peer.on('open', () => setStatus('pstatus', '✅ Ready! Receiver ko code ya link bhejo. Is page ko khula rakho.', 'ok'));
+  peer.on('error', err => { if (err.type !== 'peer-unavailable') setStatus('pstatus', '❌ ' + peerErrorText(err), 'err'); });
+  peer.on('disconnected', () => { setTimeout(() => { if (!peer.destroyed && peer.disconnected) peer.reconnect(); }, 2000); });
+  peer.on('connection', c => {
+    if (conn && conn.open) {
+      c.on('open', () => { try { c.dataChannel.send(JSON.stringify({ t: 'busy' })); } catch (e) {} setTimeout(() => c.close(), 1000); });
+      return;
+    }
+    conn = c;
+    c.on('open', () => {
+      dc = c.dataChannel;
+      dc.binaryType = 'arraybuffer';
+      dc.bufferedAmountLowThreshold = LOW_WATER;
+      dc.addEventListener('message', e => {
+        if (typeof e.data !== 'string') return;
+        let m; try { m = JSON.parse(e.data); } catch (x) { return; }
+        if (m.t === 'start') sendAll();
+      });
+      setStatus('status', '🔗 Receiver connect ho gaya! ' + (files.length ? 'Wo "Start" dabayega toh transfer shuru hoga.' : 'Ab files add karo.'), 'ok');
+      render(); sendList();
+    });
+    c.on('close', () => {
+      if (conn !== c) return;
+      conn = null; dc = null;
+      if (!sending) setStatus('status', 'Receiver disconnect ho gaya. Wo link dobara khol sakta hai.', 'wait');
+      render();
+    });
+    watchIce(c, () => { if (conn === c) setStatus('status', '❌ ' + ICE_FAIL_TEXT, 'err'); });
+  });
+}
+
+/* ============================ RECEIVER ============================ */
+function initReceiver() {
+  app.innerHTML = `
+    <div class="box">
+      <div class="small">Code</div>
+      <div class="code">${esc(CODE)}</div>
+      <div id="rstatus" class="small wait">⏳ Sender se connect ho rahe hain…</div>
+    </div>
+    <div id="list"></div>
+    <button id="start" class="btn" style="display:none">⬇️ Start Download</button>
+    <div id="status" class="small" style="margin-top:10px"></div>`;
+
+  let offered = [], cur = null, finished = false, started = false;
+
+  function renderList() {
+    $('list').innerHTML = offered.map((f, i) => `
+      <div class="item"><b>${esc(f.name)}</b> <span class="small">(${fmt(f.size)})</span>
+        <div class="bar"><div class="fill" id="rf${i}"></div></div>
+        <div class="small" id="rs${i}">Ready</div></div>`).join('');
+    updateButton();
+  }
+
+  function updateButton() {
+    const total = offered.reduce((s, f) => s + f.size, 0);
+    const btn = $('start');
+    btn.style.display = offered.length ? '' : 'none';
+    btn.disabled = started || finished;
+    btn.textContent = finished ? '✅ Download ho gaya'
+      : `⬇️ Start Download • ${offered.length} file(s) • ${fmt(total)}`;
+  }
+
+  function finishFile() {
+    if (cur.pending.length) cur.parts.push(new Blob(cur.pending));
+    const blob = new Blob(cur.parts, { type: cur.type || 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    const i = cur.i, name = cur.name;
+    $('rf' + i).style.width = '100%';
+    setStatus('rs' + i, `<span class="ok">✅ Aa gayi!</span> <a class="save" id="sv${i}" href="${url}" download="${esc(name)}">💾 Save ${esc(name)}</a>`);
+    try { $('sv' + i).click(); } catch (e) {}
+    cur = null;
+  }
+
+  if (typeof Peer === 'undefined') { setStatus('rstatus', '❌ Transfer system load nahi hua. Internet check karke refresh karo.', 'err'); return; }
+  const peer = new Peer(OPTS);
+  let opened = false;
+  peer.on('error', err => { if (!finished) setStatus('rstatus', '❌ ' + peerErrorText(err), 'err'); });
+  peer.on('disconnected', () => { setTimeout(() => { if (!peer.destroyed && peer.disconnected && !opened) peer.reconnect(); }, 2000); });
+  peer.on('open', () => {
+    const conn = peer.connect(PREFIX + CODE.toLowerCase(), { reliable: true, serialization: 'raw' });
+    const timer = setTimeout(() => { if (!opened) setStatus('rstatus', '❌ Sender se connect nahi ho paaye. Check karo: code sahi hai? Sender ka page khula hai? ' + ICE_FAIL_TEXT, 'err'); }, 30000);
+    watchIce(conn, () => { if (!finished) setStatus('rstatus', '❌ ' + ICE_FAIL_TEXT, 'err'); });
+
+    conn.on('open', () => {
+      opened = true; clearTimeout(timer);
+      const dc = conn.dataChannel;
+      dc.binaryType = 'arraybuffer';
+      setStatus('rstatus', '🔗 Sender se connect ho gaye! ' + 'Files ki list ka intezaar…', 'ok');
+
+      $('start').onclick = () => {
+        if (started || !offered.length) return;
+        started = true; updateButton(); keepAwake(true);
+        dc.send(JSON.stringify({ t: 'start' }));
+        setStatus('status', '⬇️ Files aa rahi hain… is tab ko band mat karna.', 'wait');
+      };
+
+      let lastUi = 0;
+      dc.addEventListener('message', e => {
+        const d = e.data;
+        if (typeof d === 'string') {
+          let m; try { m = JSON.parse(d); } catch (x) { return; }
+          if (m.t === 'list') { offered = m.files; started = false; finished = false; renderList(); setStatus('rstatus', '🔗 Connected. ' + (offered.length ? 'Start dabao.' : 'Sender files add kar raha hai…'), 'ok'); }
+          else if (m.t === 'file') { cur = { i: m.i, name: m.name, size: m.size, type: m.type, got: 0, parts: [], pending: [], pendingBytes: 0, t0: Date.now() }; }
+          else if (m.t === 'end') { if (cur) finishFile(); }
+          else if (m.t === 'done') { finished = true; started = false; keepAwake(false); updateButton(); setStatus('status', '🎉 Saari files aa gayi! Agar download apne aap shuru na hua ho toh "Save" link dabao.', 'ok'); }
+          else if (m.t === 'busy') { setStatus('rstatus', '⚠️ Sender abhi kisi aur ko file bhej raha hai. Thodi der baad try karo.', 'err'); }
+          return;
+        }
+        if (!cur) return;
+        cur.pending.push(d); cur.pendingBytes += d.byteLength; cur.got += d.byteLength;
+        if (cur.pendingBytes >= FLUSH_BYTES) { cur.parts.push(new Blob(cur.pending)); cur.pending = []; cur.pendingBytes = 0; }
+        if (Date.now() - lastUi > 250) {
+          lastUi = Date.now();
+          $('rf' + cur.i).style.width = (cur.got / cur.size * 100) + '%';
+          setStatus('rs' + cur.i, progressText(cur.got, cur.size, cur.t0));
+        }
+      });
+    });
+    conn.on('close', () => {
+      if (!finished) { keepAwake(false); setStatus('rstatus', '❌ Sender disconnect ho gaya. Sender ka page khula ho toh is page ko refresh karo.', 'err'); }
+    });
+  });
+}
+
+if (MODE === 'send') initSender(); else initReceiver();
+</script>
+"""
+
 # Main logic based on selection
-if conversion_type == "🖼️ Image to PDF":
+if conversion_type == P2P_TOOL:
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.subheader("Direct File Transfer")
+    st.markdown("AnyDesk ki tarah: file seedha aapke device se saamne wale ke device par jaati hai. "
+                "**Koi size limit nahi, koi account nahi, bilkul free.** Bas transfer ke waqt dono ka page khula hona chahiye.")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    incoming = clean_p2p_code(st.query_params.get("receive", ""))
+    p2p_mode = st.radio(
+        "Aap kya karna chahte ho?",
+        ["📤 File Bhejna", "📥 File Lena"],
+        index=1 if incoming else 0,
+        horizontal=True,
+    )
+
+    if p2p_mode == "📤 File Bhejna":
+        if "p2p_code" not in st.session_state:
+            st.session_state.p2p_code = new_p2p_code()
+        st.info("Kaise bhejein: (1) Files chuno, (2) code ya link receiver ko bhejo, (3) receiver 'Start' dabayega "
+                "aur file seedha uske paas pahunch jaayegi. Transfer poora hone tak ye page khula rakho aur upar ka option mat badlo.",
+                icon="💡")
+        components.html(build_p2p_html("send", st.session_state.p2p_code), height=760, scrolling=True)
+        if st.button("🔄 New Code"):
+            st.session_state.p2p_code = new_p2p_code()
+            st.rerun()
+    else:
+        code = clean_p2p_code(st.text_input("Sender ka 6 akshar ka code daalo", value=incoming, max_chars=8,
+                                            placeholder="e.g. K7P2QX"))
+        if len(code) == 6:
+            st.info("Sender ka page khula hona chahiye. Connect hone par files ki list dikhegi, phir 'Start Download' dabao. "
+                    "Transfer poora hone tak ye page khula rakho.")
+            components.html(build_p2p_html("receive", code), height=640, scrolling=True)
+        elif code:
+            st.warning("Code poore 6 akshar ka hona chahiye.")
+
+    with st.expander("ℹ️ Kaam kaise karta hai / problem aaye toh"):
+        st.markdown(
+            "- File kisi server par **save nahi hoti**. Seedha ek browser se doosre browser mein jaati hai (WebRTC, encrypted).\n"
+            "- Badi files (kai GB) ke liye **Chrome ya Edge, laptop/desktop par** sabse achha chalta hai.\n"
+            "- Speed dono taraf ke internet par depend karti hai. Ek hi WiFi par ho toh bahut tez chalti hai.\n"
+            "- Connect na ho toh: dono page refresh karo, naya code banao, ya network badal kar dekho "
+            "(kuch office/college WiFi aur kuch mobile networks direct connection rok dete hain).\n"
+            "- Beech mein connection toote toh transfer dobara Start karna padega."
+        )
+
+elif conversion_type == CLOUD_TOOL:
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.subheader("Large File Transfer")
+    st.markdown("WeTransfer ki tarah badi files bhejo. Files seedha secure cloud storage par upload hoti hain "
+                "aur aapko ek download link milta hai jo kisi ko bhi bhej sakte ho.")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    if not r2_is_configured():
+        st.warning("⚠️ File Transfer abhi setup nahi hua hai. App ke **Secrets** mein Cloudflare R2 ki details daalni hongi.")
+        with st.expander("Setup kaise karein?"):
+            st.code(
+                '[r2]\n'
+                'account_id = "YOUR_CLOUDFLARE_ACCOUNT_ID"\n'
+                'access_key_id = "YOUR_R2_ACCESS_KEY_ID"\n'
+                'secret_access_key = "YOUR_R2_SECRET_ACCESS_KEY"\n'
+                'bucket = "dk-transfers"',
+                language="toml",
+            )
+            st.markdown("Streamlit Cloud par: **App → Settings → Secrets** mein ye paste karo. "
+                        "Local chalane ke liye `.streamlit/secrets.toml` file banao.")
+    else:
+        expiry_days = st.selectbox(
+            "⏳ Download link kitne din tak chale?",
+            [1, 3, 7],
+            index=2,
+            format_func=lambda d: f"{d} din",
+        )
+
+        if "transfer_id" not in st.session_state:
+            st.session_state.transfer_id = uuid.uuid4().hex
+
+        # Keep the same URLs across reruns so an in-progress upload is not reset
+        slots_key = f"{st.session_state.transfer_id}_{expiry_days}"
+        if st.session_state.get("transfer_slots_key") != slots_key:
+            try:
+                st.session_state.transfer_slots = make_transfer_slots(st.session_state.transfer_id, expiry_days)
+                st.session_state.transfer_slots_key = slots_key
+            except Exception as e:
+                st.session_state.pop("transfer_slots", None)
+                st.session_state.pop("transfer_slots_key", None)
+                st.error(f"❌ Storage se connect nahi ho paaya: {e}")
+
+        if st.session_state.get("transfer_slots"):
+            st.info("💡 Upload ke dauran is tab ko band mat karna aur sidebar mein tool mat badalna. "
+                    "Link milne ke baad aap use WhatsApp, email kahin bhi bhej sakte ho.")
+            components.html(build_transfer_html(st.session_state.transfer_slots), height=720, scrolling=True)
+
+            if st.button("🔄 New Transfer"):
+                for k in ("transfer_id", "transfer_slots", "transfer_slots_key"):
+                    st.session_state.pop(k, None)
+                st.rerun()
+
+elif conversion_type == "🖼️ Image to PDF":
     st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.subheader("Convert Images to PDF")
     st.markdown("Combine multiple images into a single professional PDF file.")
@@ -801,6 +1529,112 @@ elif conversion_type == "🖼️ Image to Word":
                         file_name="converted_images.docx",
                         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                     )
+
+elif conversion_type == "🔁 WebP Converter":
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.subheader("WebP Converter")
+    st.markdown("Images ko WebP mein badlo (chhoti size, same quality), ya WebP ko JPG / PNG / PDF mein badlo.")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    webp_mode = st.radio(
+        "Kya karna hai?",
+        ["🖼️ Images → WebP", "🔁 WebP → JPG / PNG / PDF"],
+        horizontal=True
+    )
+
+    if webp_mode == "🖼️ Images → WebP":
+        uploaded_images = st.file_uploader(
+            "Upload Images (jpg, png, gif, bmp, tiff)",
+            type=["jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp"],
+            accept_multiple_files=True,
+            key="to_webp_uploader"
+        )
+        target_format = "WEBP"
+        out_ext, out_mime = "webp", "image/webp"
+    else:
+        uploaded_images = st.file_uploader(
+            "Upload WebP Images",
+            type=["webp"],
+            accept_multiple_files=True,
+            key="from_webp_uploader"
+        )
+        target_choice = st.selectbox("Kis format mein chahiye?", ["JPG", "PNG", "PDF (sab images ek PDF mein)"])
+        target_format = {"JPG": "JPEG", "PNG": "PNG"}.get(target_choice, "PDF")
+        out_ext, out_mime = {"JPEG": ("jpg", "image/jpeg"), "PNG": ("png", "image/png")}.get(target_format, ("pdf", "application/pdf"))
+
+    if uploaded_images:
+        st.info(f"✅ {len(uploaded_images)} image(s) selected.")
+
+        lossless = False
+        quality = 85
+        if target_format == "WEBP":
+            lossless = st.checkbox("Lossless (bilkul original quality, size thodi badi)", value=False)
+        if target_format in ("WEBP", "JPEG") and not lossless:
+            quality = st.slider("Quality (1-100)", min_value=1, max_value=100, value=85,
+                                help="Kam value = chhoti file, par quality thodi kam")
+
+        if st.button("Convert Now"):
+            if target_format == "PDF":
+                with st.spinner("WebP images ko PDF mein badal rahe hain..."):
+                    pdf_data = image_to_pdf(uploaded_images)
+                if pdf_data:
+                    st.success("🎉 PDF taiyaar hai!")
+                    st.download_button(
+                        label="📥 Download PDF",
+                        data=pdf_data,
+                        file_name="converted_webp_images.pdf",
+                        mime="application/pdf",
+                        key="dl_webp_pdf"
+                    )
+            else:
+                results = []
+                total_in, total_out = 0, 0
+                with st.spinner(f"Converting {len(uploaded_images)} image(s)..."):
+                    for f in uploaded_images:
+                        raw = f.getvalue()
+                        try:
+                            converted = convert_image_format(raw, target=target_format, quality=quality, lossless=lossless)
+                        except Exception as e:
+                            st.warning(f"⚠️ {f.name} convert nahi ho paayi: {e}")
+                            continue
+                        new_name = f"{f.name.rsplit('.', 1)[0]}.{out_ext}"
+                        results.append((new_name, raw, converted))
+                        total_in += len(raw)
+                        total_out += len(converted)
+
+                if results:
+                    st.success(f"🎉 {len(results)} image(s) converted!")
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Original Size", f"{total_in / 1024:.1f} KB")
+                    c2.metric("New Size", f"{total_out / 1024:.1f} KB")
+                    change = ((total_in - total_out) / total_in * 100) if total_in else 0
+                    c3.metric("Size Change", f"{'-' if change >= 0 else '+'}{abs(change):.1f}%")
+
+                    st.markdown("### 📦 Converted Files")
+                    for new_name, raw, converted in results:
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.image(io.BytesIO(raw), caption=f"Original — {len(raw) / 1024:.1f} KB", use_container_width=True)
+                        with col2:
+                            st.image(io.BytesIO(converted), caption=f"{new_name} — {len(converted) / 1024:.1f} KB", use_container_width=True)
+                        st.download_button(
+                            label=f"📥 Download {new_name}",
+                            data=converted,
+                            file_name=new_name,
+                            mime=out_mime,
+                            key=f"dl_webp_{new_name}"
+                        )
+                        st.markdown("---")
+
+                    if len(results) > 1:
+                        zip_buf = create_zip_from_files([(n, c) for n, _r, c in results])
+                        st.download_button(
+                            label="🗂️ Download All as ZIP",
+                            data=zip_buf.getvalue(),
+                            file_name=f"converted_{out_ext}_images.zip",
+                            mime="application/zip",
+                            key="dl_webp_zip"
+                        )
 
 elif conversion_type == "📝 Image to Editable Text (OCR)":
     st.markdown("<div class='card'>", unsafe_allow_html=True)
@@ -942,7 +1776,7 @@ elif conversion_type == "🔽 Compress Image":
         for idx, img_file in enumerate(uploaded_images):
             img_file.seek(0)
             orig_size = get_file_size(img_file)
-            with st.expander(f"�️ {img_file.name} — Original: {orig_size}", expanded=(idx == 0)):
+            with st.expander(f"🖼️ {img_file.name} — Original: {orig_size}", expanded=(idx == 0)):
                 st.image(img_file, caption=f"Original: {img_file.name}")
 
         quality = st.slider("Compression Quality (1-100)", min_value=1, max_value=100, value=85,
@@ -995,7 +1829,7 @@ elif conversion_type == "🔽 Compress Image":
             if len(compressed_results) > 0:
                 zip_buf = create_zip_from_files(compressed_results)
                 st.download_button(
-                    label="�️ Download All Compressed Images as ZIP",
+                    label="🗂️ Download All Compressed Images as ZIP",
                     data=zip_buf.getvalue(),
                     file_name="compressed_images.zip",
                     mime="application/zip",
@@ -1016,7 +1850,7 @@ elif conversion_type == "🔽 Compress PDF":
         for idx, pdf_file in enumerate(uploaded_pdfs):
             pdf_file.seek(0)
             orig_size = get_file_size(pdf_file)
-            st.markdown(f"- � **{pdf_file.name}** — Original: **{orig_size}**")
+            st.markdown(f"- 📄 **{pdf_file.name}** — Original: **{orig_size}**")
 
         quality = st.select_slider("Compression Level", options=["high", "medium", "low"], value="low",
                                    help="Low = Maximum compression (smallest file size)")
@@ -1057,7 +1891,7 @@ elif conversion_type == "🔽 Compress PDF":
             for f_name, f_bytes, orig_b, comp_b in compressed_results:
                 red_percent = ((orig_b - comp_b) / orig_b) * 100 if orig_b > 0 else 0
                 colA, colB, colC = st.columns(3)
-                colA.info(f"� {f_name}")
+                colA.info(f"📄 {f_name}")
                 colB.info(f"Size: {orig_b / 1024:.1f} KB → {comp_b / 1024:.1f} KB")
                 if red_percent > 0:
                     colC.success(f"Reduced by {red_percent:.1f}%")
