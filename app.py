@@ -12,17 +12,10 @@ os.environ['EASYOCR_MODULE_PATH'] = os.path.join(os.getcwd(), '.easyocr_models')
 import streamlit as st
 import streamlit.components.v1 as components
 from PIL import Image
-import fitz  # PyMuPDF
-from pdf2docx import Converter
-from docx import Document
-from docx.shared import Inches
-import pdfplumber
-import pandas as pd
 import io
 import tempfile
-import easyocr
-import numpy as np
-import cv2
+# Heavy libraries (EasyOCR/PyTorch, PyMuPDF, pdf2docx, OpenCV, pandas...) are imported
+# inside the tools that use them, so the app - and shared transfer links - open much faster.
 
 # Set page configuration with custom theme
 st.set_page_config(
@@ -441,6 +434,21 @@ tool_options += [
 conversion_type = st.sidebar.selectbox("Select what you want to do:", tool_options)
 
 # Helper functions for conversion
+@st.cache_resource(show_spinner="OCR model load ho raha hai (sirf pehli baar thoda time lagta hai)...")
+def get_ocr_reader(lang_list=("en", "hi")):
+    """Loads the EasyOCR model once and reuses it for every OCR request (much faster after the first time)."""
+    import contextlib
+    import easyocr
+    # Set custom model directory inside project to avoid permission issues
+    model_dir = os.path.join(os.getcwd(), '.easyocr_models')
+    user_network_dir = os.path.join(model_dir, 'user_network')
+    os.makedirs(model_dir, exist_ok=True)
+    os.makedirs(user_network_dir, exist_ok=True)
+    # Redirect stdout/stderr to null to suppress EasyOCR output (prevents Unicode errors)
+    with open(os.devnull, 'w') as f_null, contextlib.redirect_stdout(f_null), contextlib.redirect_stderr(f_null):
+        return easyocr.Reader(list(lang_list), gpu=False, model_storage_directory=model_dir,
+                              user_network_directory=user_network_dir, verbose=False)
+
 def image_to_pdf(uploaded_files):
     """
     Converts a list of images into a single PDF file.
@@ -463,17 +471,9 @@ def image_to_word(uploaded_files, lang_list=['en', 'hi']):
     """
     Converts a list of images into a single Word document by extracting text via OCR.
     """
-    import contextlib
-    
-    # Set custom model directory
-    model_dir = os.path.join(os.getcwd(), '.easyocr_models')
-    user_network_dir = os.path.join(model_dir, 'user_network')
-    os.makedirs(model_dir, exist_ok=True)
-    os.makedirs(user_network_dir, exist_ok=True)
-    
-    # Initialize OCR reader
-    with open(os.devnull, 'w') as f_null, contextlib.redirect_stdout(f_null), contextlib.redirect_stderr(f_null):
-        reader = easyocr.Reader(lang_list, gpu=False, model_storage_directory=model_dir, user_network_directory=user_network_dir, verbose=False)
+    from docx import Document
+    from docx.shared import Inches
+    reader = get_ocr_reader(tuple(lang_list))
     
     doc = Document()
     for idx, uploaded_file in enumerate(uploaded_files):
@@ -508,6 +508,7 @@ def pdf_to_images(uploaded_pdf):
     Converts each page of a PDF into a separate image.
     Returns a list of image buffers.
     """
+    import fitz  # PyMuPDF
     pdf_bytes = uploaded_pdf.read()
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     image_buffers = []
@@ -552,6 +553,7 @@ def pdf_to_word(uploaded_pdf):
     """
     Converts a PDF file to a Word document (.docx).
     """
+    from pdf2docx import Converter
     # Create a temporary file to store the PDF
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_pdf:
         temp_pdf.write(uploaded_pdf.read())
@@ -583,6 +585,8 @@ def pdf_to_excel(uploaded_pdf):
     Extracts tables from a PDF file and saves them into an Excel file.
     Each table is saved in a different sheet.
     """
+    import pdfplumber
+    import pandas as pd
     pdf_bytes = uploaded_pdf.read()
     excel_buffer = io.BytesIO()
     
@@ -607,6 +611,7 @@ def merge_pdfs(uploaded_pdfs):
     """
     Merges multiple PDF files into a single PDF.
     """
+    import fitz  # PyMuPDF
     merger = fitz.open()
     
     for uploaded_pdf in uploaded_pdfs:
@@ -675,6 +680,7 @@ def compress_pdf(uploaded_pdf, quality='medium'):
     """
     Compresses a PDF file with maximum compression by reducing image quality and size.
     """
+    import fitz  # PyMuPDF
     pdf_bytes = uploaded_pdf.read()
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     
@@ -742,18 +748,7 @@ def image_to_editable_text(uploaded_image, lang_list=['en', 'hi']):
     Extracts editable text from an image using OCR (Optical Character Recognition).
     Supports multiple languages (default: English + Hindi).
     """
-    import contextlib
-    
-    # Set custom model directory inside project to avoid permission issues
-    model_dir = os.path.join(os.getcwd(), '.easyocr_models')
-    user_network_dir = os.path.join(model_dir, 'user_network')
-    os.makedirs(model_dir, exist_ok=True)
-    os.makedirs(user_network_dir, exist_ok=True)
-    
-    # Redirect stdout/stderr to null to completely suppress EasyOCR output (prevents Unicode errors)
-    with open(os.devnull, 'w') as f_null, contextlib.redirect_stdout(f_null), contextlib.redirect_stderr(f_null):
-        # Initialize EasyOCR reader with custom model and user network directories, no verbose output
-        reader = easyocr.Reader(lang_list, gpu=False, model_storage_directory=model_dir, user_network_directory=user_network_dir, verbose=False)
+    reader = get_ocr_reader(tuple(lang_list))
     
     # Read the image
     img = Image.open(uploaded_image)
@@ -777,6 +772,7 @@ def detect_watermark_mask(img_bgr, tolerance=30, dilate_size=3):
     Returns a single-channel mask (uint8) where watermark pixels > 0.
     Uses L channel from LAB + threshold + morphological dilation.
     """
+    import cv2
     lab = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB)
     l_channel = lab[:, :, 0]
     _, bright_mask = cv2.threshold(l_channel, 255 - tolerance, 255, cv2.THRESH_BINARY)
@@ -794,6 +790,8 @@ def remove_watermark(image_buffer, tolerance=30, inpaint_radius=5, method='auto'
       - 'auto'   => auto-detect watermark mask & inpaint
       - 'manual' => caller provides mask separately; here equivalent to auto
     """
+    import numpy as np
+    import cv2
     try:
         if hasattr(image_buffer, 'read'):
             raw = image_buffer.read()
@@ -1023,6 +1021,14 @@ function showLinks(results) {
 </script>
 """
 
+def show_html_component(html, height):
+    """Shows our own HTML/JS widget. Uses st.iframe on newer Streamlit (components.html is being retired)
+    and falls back to components.html on older versions."""
+    if hasattr(st, "iframe"):
+        st.iframe(html, height=height)
+    else:
+        components.html(html, height=height, scrolling=True)
+
 def build_transfer_html(slots):
     return (TRANSFER_HTML
             .replace("__SLOTS__", json.dumps(slots))
@@ -1150,6 +1156,12 @@ P2P_HTML = r"""
   .x { background:none; border:none; color:var(--muted); font-size:15px; cursor:pointer; padding:6px 8px; border-radius:8px; flex:none; }
   .x:hover { color:var(--red); background:var(--panel2); }
 
+  .route { margin-top:8px; padding-left:17px; font-size:12px; color:var(--muted); }
+  .route:empty { display:none; }
+  .route b { color:var(--text); font-weight:650; }
+  .tip { margin-top:10px; background:rgba(251,191,36,.08); border:1px solid rgba(251,191,36,.35); color:#fde68a;
+         border-radius:12px; padding:10px 12px; font-size:13px; }
+  .tip b { color:#fff; }
   .total { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; font-size:13px; color:var(--muted); margin-top:10px; padding:0 4px; }
   .total:empty { display:none; }
   .total b { color:var(--text); }
@@ -1268,6 +1280,49 @@ function totalLine(count, size, done, t0) {
   return left + `<span>Kul: ${progressText(done, size, t0)}</span>`;
 }
 
+/* ---------------- connection route (same WiFi vs internet) + speed tip ---------------- */
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+let routeKind = null, tipShown = false;
+async function routeInfo(pc) {
+  const stats = await pc.getStats(), byId = new Map(); let pair = null;
+  stats.forEach(r => byId.set(r.id, r));
+  stats.forEach(r => { if (r.type === 'transport' && r.selectedCandidatePairId) pair = byId.get(r.selectedCandidatePairId); });
+  if (!pair) stats.forEach(r => { if (r.type === 'candidate-pair' && r.nominated && r.state === 'succeeded') pair = r; });
+  if (!pair) return null;
+  const types = [byId.get(pair.localCandidateId), byId.get(pair.remoteCandidateId)].map(c => c && c.candidateType);
+  const rtt = pair.currentRoundTripTime;
+  window.__lastRoute = { types, rtt };
+  if (types.includes('relay')) return { kind: 'relay', rtt };
+  if (types.includes('srflx')) return { kind: 'internet', rtt };
+  if (types[0] === 'host' && types[1] === 'host') return { kind: 'lan', rtt };   // both private addresses reach each other directly
+  if (rtt == null) return null;                                                 // not measured yet, ask again
+  return { kind: rtt < 0.02 ? 'lan' : 'internet', rtt };
+}
+function routeHtml(r) {
+  if (r.kind === 'lan') return '⚡ <b>Same WiFi / network</b> se seedha ja raha hai. Ye sabse tez rasta hai.';
+  if (r.kind === 'relay') return '🛰️ <b>Relay server</b> ke through ja raha hai, speed thodi kam rahegi.';
+  return '🌐 <b>Internet</b> ke through ja raha hai. Speed bhejne wale ke internet upload par depend karti hai.';
+}
+async function showRoute(pc) {
+  if (!pc) return;
+  for (let i = 0; i < 10; i++) {
+    await sleep(700);
+    try {
+      const r = await routeInfo(pc);
+      if (r) { routeKind = r.kind; const el = $('route'); if (el) el.innerHTML = routeHtml(r); return; }
+    } catch (e) {}
+  }
+}
+const SLOW_TIP = '💡 Speed aapke internet se limited hai. Tez chahiye toh dono devices <b>ek hi WiFi</b> par lao, ' +
+  'ya ek device ka <b>hotspot</b> on karke doosre ko usse jodo. Tab file internet se nahi, seedha jaati hai aur kai guna tez hoti hai. ' +
+  'Phone par screen on rakho aur browser ko background mein mat bhejo.';
+function maybeTip(done, t0) {
+  if (tipShown || routeKind === 'lan') return;
+  const secs = (Date.now() - t0) / 1000;
+  if (secs < 10) return;
+  if (done / secs < 1.5 * 1024 * 1024) { tipShown = true; const el = $('tip'); if (el) el.innerHTML = `<div class="tip">${SLOW_TIP}</div>`; }
+}
+
 /* ---------------- CRC32 + ZIP (store, no compression, ZIP64 when needed) ---------------- */
 const CRC_TABLE = (() => {
   const t = new Uint32Array(256);
@@ -1379,6 +1434,7 @@ function initSender() {
         <div class="dev right"><div class="ic" id="themic">⌛</div><div><b>Receiver</b><span id="themsub">Abhi juda nahi</span></div></div>
       </div>
       <div class="state"><span class="dot"></span><span id="pstatus">Ready ho raha hai…</span></div>
+      <div class="route" id="route"></div>
     </div>
     <div class="panel">
       <div class="codewrap">
@@ -1404,6 +1460,7 @@ function initSender() {
     <input id="dinp" type="file" webkitdirectory directory multiple style="display:none">
     <div id="list" class="rows"></div>
     <div id="total" class="total"></div>
+    <div id="tip"></div>
     <div id="status" class="msg"></div>`;
 
   $('cpc').onclick = () => copyText(CODE, $('cpc'), '📋 Code copy');
@@ -1414,7 +1471,8 @@ function initSender() {
     $('wa').href = 'https://wa.me/?text=' + encodeURIComponent(`Ye file(s) lene ke liye link kholo:\n${url}\n\nCode: ${CODE}`);
   }
 
-  let groups = [], conn = null, dc = null, sending = false, batchDone = false;
+  let groups = [], conn = null, connRid = null, dc = null, sending = false, batchDone = false;
+  let abortRun = false, runDone = Promise.resolve();
   const drop = $('drop'), inp = $('inp'), dinp = $('dinp');
   $('pf').onclick = () => { if (!sending) inp.click(); };
   $('pd').onclick = () => { if (!sending) dinp.click(); };
@@ -1478,64 +1536,90 @@ function initSender() {
       dc.send(JSON.stringify({ t: 'list', groups: summary.slice(s, s + LIST_SLICE), first: s === 0, more: s + LIST_SLICE < summary.length }));
   }
 
-  function drain() {
-    if (dc.bufferedAmount < HIGH_WATER) return Promise.resolve();
+  function drain(ch) {
+    if (ch.bufferedAmount < HIGH_WATER) return Promise.resolve();
     return new Promise((res, rej) => {
       const ok = () => { cleanup(); res(); }, bad = () => { cleanup(); rej(new Error('closed')); };
-      const cleanup = () => { dc.removeEventListener('bufferedamountlow', ok); dc.removeEventListener('close', bad); };
-      dc.addEventListener('bufferedamountlow', ok); dc.addEventListener('close', bad);
+      const cleanup = () => { ch.removeEventListener('bufferedamountlow', ok); ch.removeEventListener('close', bad); };
+      ch.addEventListener('bufferedamountlow', ok); ch.addEventListener('close', bad);
     });
   }
 
-  async function sendAll() {
-    if (sending || !groups.length) return;
-    sending = true; render(); keepAwake(true);
+  // resume = { g, fi, off } from the receiver: continue exactly where it stopped
+  async function sendAll(resume) {
+    if (sending) { abortRun = true; await runDone; }   // stop an old run that was using a dead connection
+    if (!groups.length || !dc || dc.readyState !== 'open') return;
+    abortRun = false; sending = true;
+    let finishRun; runDone = new Promise(r => finishRun = r);
+    const ch = dc;
+    const r0 = resume && typeof resume.g === 'number' ? resume : { g: 0, fi: 0, off: 0 };
+    render(); keepAwake(true);
     setConn('busy', 'File le raha hai');
-    setStatus('pstatus', 'Transfer chal raha hai. Ye tab band mat karna.');
+    setStatus('pstatus', r0.g || r0.fi || r0.off ? 'Receiver dobara jud gaya. Jahan ruka tha wahin se aage bhej rahe hain.' : 'Transfer chal raha hai. Ye tab band mat karna.');
     setStatus('status', '');
-    const pc = conn.peerConnection;
+    showRoute(conn && conn.peerConnection);
+    const pc = conn && conn.peerConnection;
     const maxMsg = (pc && pc.sctp && pc.sctp.maxMessageSize) || 65536;
     const CH = Math.max(16384, Math.min(65536, maxMsg));
-    const all = totals(), tAll = Date.now(); let allSent = 0;
+    const all = totals(), tAll = Date.now();
+    // bytes already delivered before the resume point
+    let already = 0;
+    for (let gi = 0; gi < groups.length; gi++)
+      for (let fi = 0; fi < groups[gi].files.length; fi++)
+        if (gi < r0.g || (gi === r0.g && fi < r0.fi)) already += groups[gi].files[fi].file.size;
+    if (r0.g < groups.length && groups[r0.g].files[r0.fi]) already += r0.off;
+    let allSent = already;
+    for (let gi = 0; gi < r0.g && gi < groups.length; gi++) {
+      $('sf' + gi).style.width = '100%'; $('sf' + gi).classList.add('done');
+    }
     try {
-      for (let gi = 0; gi < groups.length; gi++) {
-        const g = groups[gi], t0 = Date.now(); let gsent = 0, lastUi = 0;
-        for (let fi = 0; fi < g.files.length; fi++) {
+      for (let gi = r0.g; gi < groups.length; gi++) {
+        const g = groups[gi], t0 = Date.now(), startFi = gi === r0.g ? r0.fi : 0;
+        let gsent = 0, lastUi = 0, sentThisRun = 0;
+        for (let fi = 0; fi < startFi && fi < g.files.length; fi++) gsent += g.files[fi].file.size;
+        for (let fi = startFi; fi < g.files.length; fi++) {
           const { file: f, path } = g.files[fi];
-          dc.send(JSON.stringify({ t: 'file', g: gi, path, size: f.size, type: f.type }));
-          for (let off = 0; off < f.size; off += READ_BLOCK) {
-            const buf = await f.slice(off, off + READ_BLOCK).arrayBuffer();
+          const startOff = (gi === r0.g && fi === startFi) ? Math.min(r0.off || 0, f.size) : 0;
+          gsent += startOff;
+          ch.send(JSON.stringify({ t: 'file', g: gi, fi, path, size: f.size, type: f.type, off: startOff }));
+          for (let off = startOff; off < f.size; off += READ_BLOCK) {
+            const buf = await f.slice(off, Math.min(off + READ_BLOCK, f.size)).arrayBuffer();
             for (let p = 0; p < buf.byteLength; p += CH) {
-              await drain();
-              if (dc.readyState !== 'open') throw new Error('closed');
-              dc.send(buf.slice(p, p + CH));
+              if (abortRun) throw new Error('aborted');
+              await drain(ch);
+              if (abortRun) throw new Error('aborted');
+              if (ch.readyState !== 'open') throw new Error('closed');
+              ch.send(buf.slice(p, p + CH));
             }
-            gsent += buf.byteLength; allSent += buf.byteLength;
+            gsent += buf.byteLength; allSent += buf.byteLength; sentThisRun += buf.byteLength;
             if (Date.now() - lastUi > 250) {
               lastUi = Date.now();
               $('sf' + gi).style.width = pct(gsent, g.size) + '%';
               setStatus('ss' + gi, (g.kind === 'folder' ? `File ${fi + 1}/${g.files.length} • ` : '') + progressText(gsent, g.size, t0));
               $('total').innerHTML = totalLine(all.count, all.size, allSent, tAll);
+              maybeTip(allSent - already, tAll);
             }
           }
-          if (dc.readyState !== 'open') throw new Error('closed');
-          dc.send(JSON.stringify({ t: 'end' }));
+          if (ch.readyState !== 'open') throw new Error('closed');
+          ch.send(JSON.stringify({ t: 'end' }));
         }
-        dc.send(JSON.stringify({ t: 'gend', g: gi }));
+        ch.send(JSON.stringify({ t: 'gend', g: gi }));
         $('sf' + gi).style.width = '100%'; $('sf' + gi).classList.add('done');
         setStatus('ss' + gi, (g.kind === 'folder' ? g.files.length + ' files • ' : '') + fmt(g.size) + ' • <span class="ok">Bhej diya</span>');
       }
-      dc.send(JSON.stringify({ t: 'done' }));
+      ch.send(JSON.stringify({ t: 'done' }));
       batchDone = true;
       setConn('connected', 'Sab mil gaya');
       setStatus('pstatus', 'Transfer poora ho gaya.');
       setStatus('status', '🎉 Sab kuch bhej diya! Aur bhejna ho toh nayi files ya folder chuno.', 'ok');
+      $('tip').innerHTML = '';
     } catch (e) {
-      setConn('error', 'Beech mein toot gaya');
-      setStatus('pstatus', 'Receiver disconnect ho gaya.');
-      setStatus('status', 'Transfer beech mein ruk gaya. Receiver link dobara khol kar "Start Download" dabaye.', 'err');
+      if (!abortRun) {
+        setConn('ready', 'Dobara judne ka intezaar');
+        setStatus('pstatus', 'Connection toot gaya. Receiver apne aap dobara judega aur transfer wahin se aage chalega. Ye page khula rakho.', 'wait');
+      }
     }
-    sending = false; keepAwake(false); render();
+    sending = false; keepAwake(false); render(); finishRun();
   }
 
   if (typeof Peer === 'undefined') {
@@ -1546,31 +1630,38 @@ function initSender() {
   peer.on('error', err => { if (err.type !== 'peer-unavailable') { setConn('error'); setStatus('pstatus', peerErrorText(err), 'err'); } });
   peer.on('disconnected', () => { setTimeout(() => { if (!peer.destroyed && peer.disconnected) peer.reconnect(); }, 2000); });
   peer.on('connection', c => {
-    if (conn && conn.open) {
+    const rid = c.metadata && c.metadata.rid;
+    // a different receiver while one is connected -> busy; the SAME receiver reconnecting -> replace the stale link
+    if (conn && conn.open && rid !== connRid) {
       c.on('open', () => { try { c.dataChannel.send(JSON.stringify({ t: 'busy' })); } catch (e) {} setTimeout(() => c.close(), 1000); });
       return;
     }
-    conn = c;
+    const old = conn;
+    conn = c; connRid = rid; dc = null;
+    if (old && old !== c) { abortRun = true; try { old.close(); } catch (e) {} }
     c.on('open', () => {
+      if (conn !== c) return;
       dc = c.dataChannel;
       dc.binaryType = 'arraybuffer';
       dc.bufferedAmountLowThreshold = LOW_WATER;
       dc.addEventListener('message', e => {
-        if (typeof e.data !== 'string') return;
+        if (typeof e.data !== 'string' || conn !== c) return;
         let m; try { m = JSON.parse(e.data); } catch (x) { return; }
-        if (m.t === 'start') sendAll();
+        if (m.t === 'start') sendAll(m.resume);
+        else if (m.t === 'hello') sendList();   // receiver asks for the file list (also repeats if one got lost)
       });
       setConn('connected', 'Jud gaya');
-      setStatus('pstatus', groups.length ? 'Receiver jud gaya. Wo "Start Download" dabayega toh transfer shuru hoga.' : 'Receiver jud gaya. Ab files ya folder chuno.');
+      if (!sending) setStatus('pstatus', groups.length ? 'Receiver jud gaya. Wo "Start Download" dabayega toh transfer shuru hoga.' : 'Receiver jud gaya. Ab files ya folder chuno.');
+      showRoute(c.peerConnection);
       render(); sendList();
     });
     c.on('close', () => {
       if (conn !== c) return;
       conn = null; dc = null;
-      if (!sending) { setConn('ready', 'Disconnect ho gaya'); setStatus('pstatus', 'Receiver chala gaya. Wo link dobara khol sakta hai.'); }
+      if (!sending && !batchDone) { setConn('ready', 'Disconnect ho gaya'); setStatus('pstatus', 'Receiver chala gaya. Wo link dobara khol sakta hai.'); }
       render();
     });
-    watchIce(c, () => { if (conn === c) { setConn('error', 'Connect nahi ho paaya'); setStatus('pstatus', ICE_FAIL_TEXT, 'err'); } });
+    watchIce(c, () => { if (conn === c && !sending) { setConn('error', 'Connect nahi ho paaya'); setStatus('pstatus', ICE_FAIL_TEXT, 'err'); } });
   });
 }
 
@@ -1584,14 +1675,21 @@ function initReceiver() {
         <div class="dev me right"><div class="ic">💻</div><div><b>Aap</b><span>Code ${esc(CODE)}</span></div></div>
       </div>
       <div class="state"><span class="dot"></span><span id="rstatus">Sender se connect ho rahe hain…</span></div>
+      <div class="route" id="route"></div>
     </div>
     <div id="list" class="rows"></div>
     <div id="total" class="total"></div>
     <button id="start" class="btn big" style="display:none">⬇️ Start Download</button>
+    <div id="tip"></div>
     <div id="status" class="msg"></div>`;
 
-  let offered = [], incoming = [], cur = null, gstate = {}, zips = {}, finished = false, started = false;
-  let allGot = 0, tAll = 0;
+  const RID = Math.random().toString(36).slice(2, 12);   // lets the sender recognise us when we reconnect
+  const RECONNECT_FOR = 3 * 60 * 1000;                   // keep trying for 3 minutes after a drop
+  const STALL_MS = 20000;                                // no data for 20 s during a transfer = dropped
+  let offered = [], offeredSig = '', incoming = [], cur = null, gstate = {}, zips = {}, finished = false, started = false;
+  let doneFiles = {}, savedGroups = new Set();
+  let allGot = 0, tAll = 0, lastDataAt = 0;
+  let conn = null, dc = null, everOpened = false, reconnectUntil = 0, reconnectTimer = null;
 
   function totals() {
     return { count: offered.reduce((s, g) => s + g.count, 0), size: offered.reduce((s, g) => s + g.size, 0) };
@@ -1623,6 +1721,7 @@ function initReceiver() {
   }
 
   function saveBlob(g, blob, name) {
+    savedGroups.add(g);
     const url = URL.createObjectURL(blob);
     const fill = $('rf' + g); fill.style.width = '100%'; fill.classList.add('done');
     const o = offered[g];
@@ -1634,6 +1733,7 @@ function initReceiver() {
   function finishFile() {
     if (cur.pending.length) cur.parts.push(new Blob(cur.pending));
     const g = offered[cur.g];
+    doneFiles[cur.g] = (doneFiles[cur.g] || 0) + 1;
     if (g && g.kind === 'folder') {
       (zips[cur.g] = zips[cur.g] || new ZipBuilder()).add(cur.path, cur.got, cur.crc, cur.parts);
     } else {
@@ -1644,94 +1744,184 @@ function initReceiver() {
 
   function finishGroup(gi) {
     const g = offered[gi];
-    if (!g || g.kind !== 'folder') return;
+    if (!g || g.kind !== 'folder' || savedGroups.has(gi)) return;
     setStatus('rs' + gi, 'ZIP bana rahe hain…', 'wait');
     const zip = zips[gi] || new ZipBuilder();
     delete zips[gi];
     saveBlob(gi, zip.finish(), g.name + '.zip');
   }
 
+  // exactly where to continue after a reconnect
+  function resumePoint() {
+    if (cur) return { g: cur.g, fi: cur.fi, off: cur.got };
+    for (let g = 0; g < offered.length; g++) if (!savedGroups.has(g)) return { g, fi: doneFiles[g] || 0, off: 0 };
+    return { g: offered.length, fi: 0, off: 0 };
+  }
+
+  function onMessage(d) {
+    lastDataAt = Date.now();
+    if (typeof d === 'string') {
+      let m; try { m = JSON.parse(d); } catch (x) { return; }
+      if (m.t === 'list') {
+        if (m.first) incoming = [];
+        incoming.push(...m.groups);
+        if (m.more) return;
+        const sig = JSON.stringify(incoming);
+        if ((started || finished) && sig === offeredSig) return;   // same list again (reconnect / repeat): keep progress and Save links
+        offered = incoming; offeredSig = sig; started = false; finished = false;
+        cur = null; gstate = {}; zips = {}; doneFiles = {}; savedGroups = new Set();
+        renderList();
+        setConn('connected', 'Jud gaya');
+        setStatus('rstatus', offered.length ? 'Files taiyaar hain. "Start Download" dabao.' : 'Sender files chun raha hai…');
+      }
+      else if (m.t === 'file') {
+        const resumingSame = cur && m.off > 0 && cur.g === m.g && cur.fi === m.fi && cur.got === m.off;
+        if (!resumingSame) {
+          const gs = gstate[m.g] = gstate[m.g] || { got: 0, n: 0, t0: Date.now() };
+          gs.n++;
+          cur = { g: m.g, fi: m.fi, path: m.path, size: m.size, type: m.type, got: 0, crc: 0, parts: [], pending: [], pendingBytes: 0,
+                  zip: !!(offered[m.g] && offered[m.g].kind === 'folder') };
+        }
+      }
+      else if (m.t === 'end') { if (cur) finishFile(); }
+      else if (m.t === 'gend') { finishGroup(m.g); }
+      else if (m.t === 'done') {
+        finished = true; started = false; keepAwake(false); updateButton();
+        const t = totals(); $('total').innerHTML = totalLine(t.count, t.size);
+        setConn('connected', 'Sab bhej diya');
+        setStatus('rstatus', 'Transfer poora ho gaya.');
+        setStatus('status', '🎉 Sab kuch aa gaya! Download apne aap shuru na hua ho toh "Save" link dabao.', 'ok');
+        $('tip').innerHTML = '';
+      }
+      else if (m.t === 'busy') { setConn('error', 'Busy hai'); setStatus('rstatus', 'Sender abhi kisi aur ko file bhej raha hai. Thodi der baad try karo.', 'err'); }
+      return;
+    }
+    if (!cur) return;
+    if (cur.zip) cur.crc = crc32(cur.crc, d);
+    cur.pending.push(d); cur.pendingBytes += d.byteLength; cur.got += d.byteLength; allGot += d.byteLength;
+    if (cur.pendingBytes >= FLUSH_BYTES) { cur.parts.push(new Blob(cur.pending)); cur.pending = []; cur.pendingBytes = 0; }
+    const gs = gstate[cur.g]; gs.got += d.byteLength;
+    if (Date.now() - onMessage.lastUi > 250 || !onMessage.lastUi) {
+      onMessage.lastUi = Date.now();
+      const g = offered[cur.g] || { size: cur.size, count: 1, kind: 'file' };
+      $('rf' + cur.g).style.width = pct(gs.got, g.size) + '%';
+      setStatus('rs' + cur.g, (g.kind === 'folder' ? `File ${gs.n}/${g.count} • ` : '') + progressText(gs.got, g.size, gs.t0));
+      const t = totals(); $('total').innerHTML = totalLine(t.count, t.size, allGot, tAll);
+      maybeTip(allGot - onMessage.gotAtStart, tAll);
+    }
+  }
+
+  $('start').onclick = () => {
+    if (started || !offered.length || !dc || dc.readyState !== 'open') return;
+    started = true; gstate = {}; zips = {}; doneFiles = {}; savedGroups = new Set(); cur = null;
+    allGot = 0; onMessage.gotAtStart = 0; tAll = lastDataAt = Date.now();
+    updateButton(); keepAwake(true);
+    dc.send(JSON.stringify({ t: 'start' }));
+    setConn('busy', 'Bhej raha hai');
+    setStatus('rstatus', 'Files aa rahi hain. Ye tab band mat karna.');
+    setStatus('status', '');
+  };
+
+  /* ---------- connection + automatic reconnect / resume ---------- */
+  function connect() {
+    if (finished) return;
+    const c = peer.connect(PREFIX + CODE.toLowerCase(), { reliable: true, serialization: 'raw', metadata: { rid: RID } });
+    conn = c;
+    const pc = c.peerConnection;
+    if (pc) pc.addEventListener('iceconnectionstatechange', () => {
+      const st = pc.iceConnectionState;
+      if (st === 'failed') lost(c);
+      else if (st === 'disconnected') setTimeout(() => { if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') lost(c); }, 6000);
+    });
+    c.on('open', () => {
+      if (conn !== c) { try { c.close(); } catch (e) {} return; }
+      everOpened = true; reconnectUntil = 0; clearTimeout(firstTimer);
+      dc = c.dataChannel; dc.binaryType = 'arraybuffer';
+      const myDc = dc;
+      let gotList = false;
+      dc.addEventListener('message', e => {
+        if (dc !== myDc) return;
+        if (typeof e.data === 'string' && e.data.startsWith('{"t":"list"')) gotList = true;
+        onMessage(e.data);
+      });
+      // ask for the file list now, and again every 3 s until it arrives
+      const askList = () => { if (dc === myDc && myDc.readyState === 'open' && !gotList && !started && !finished) { myDc.send(JSON.stringify({ t: 'hello' })); setTimeout(askList, 3000); } };
+      askList();
+      showRoute(c.peerConnection);
+      if (started && !finished) {
+        lastDataAt = Date.now();
+        dc.send(JSON.stringify({ t: 'start', resume: resumePoint() }));
+        setConn('busy', 'Bhej raha hai');
+        setStatus('rstatus', 'Dobara jud gaye! Jahan ruka tha wahin se aage aa raha hai.', 'ok');
+      } else {
+        setConn('connected', 'Jud gaya');
+        setStatus('rstatus', offered.length ? 'Files taiyaar hain. "Start Download" dabao.' : 'Sender se jud gaye. Files ki list aa rahi hai…');
+      }
+    });
+    c.on('close', () => lost(c));
+  }
+
+  function lost(c) {
+    if (conn !== c || finished) return;
+    conn = null; dc = null;
+    try { c.close(); } catch (e) {}
+    if (!everOpened) {
+      setConn('error', 'Connect nahi ho paaya'); setStatus('rstatus', ICE_FAIL_TEXT, 'err'); return;
+    }
+    if (!reconnectUntil) reconnectUntil = Date.now() + RECONNECT_FOR;
+    setConn('ready', 'Dobara jod rahe hain…');
+    setStatus('rstatus', started ? 'Connection toot gaya. Dobara jod rahe hain, transfer wahin se aage chalega. Ye page band mat karna.'
+                                 : 'Connection toot gaya. Dobara jod rahe hain…', 'wait');
+    scheduleReconnect(1500);
+  }
+
+  function scheduleReconnect(ms) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(() => {
+      if (finished || conn) return;
+      if (Date.now() > reconnectUntil) {
+        setConn('error', 'Nahi jud paaya');
+        setStatus('rstatus', 'Sender se dobara nahi jud paaye. Sender ka page khula ho toh is page ko refresh karke Start karo.', 'err');
+        return;
+      }
+      if (peer.disconnected) { try { peer.reconnect(); } catch (e) {} scheduleReconnect(3000); return; }
+      connect();
+      // if this attempt does not open, try again
+      const attempt = conn;
+      setTimeout(() => { if (conn === attempt && !(attempt && attempt.open)) { conn = null; try { attempt.close(); } catch (e) {} scheduleReconnect(500); } }, 12000);
+    }, ms);
+  }
+
+  // stall watchdog: data stopped without the browser noticing a drop
+  setInterval(() => {
+    if (started && !finished && conn && conn.open && Date.now() - lastDataAt > STALL_MS) lost(conn);
+  }, 3000);
+
   if (typeof Peer === 'undefined') {
     setConn('error'); setStatus('rstatus', 'Transfer system load nahi hua. Internet check karke page refresh karo.', 'err'); return;
   }
   const peer = new Peer(OPTS);
-  let opened = false;
-  peer.on('error', err => { if (!finished) { setConn('error', 'Nahi mila'); setStatus('rstatus', peerErrorText(err), 'err'); } });
-  peer.on('disconnected', () => { setTimeout(() => { if (!peer.destroyed && peer.disconnected && !opened) peer.reconnect(); }, 2000); });
-  peer.on('open', () => {
-    setConn('ready', 'Dhoondh rahe hain…');
-    const conn = peer.connect(PREFIX + CODE.toLowerCase(), { reliable: true, serialization: 'raw' });
-    const timer = setTimeout(() => {
-      if (!opened) { setConn('error', 'Nahi mila'); setStatus('rstatus', 'Sender se connect nahi ho paaye. Code sahi hai? Sender ka page khula hai? ' + ICE_FAIL_TEXT, 'err'); }
-    }, 30000);
-    watchIce(conn, () => { if (!finished) { setConn('error', 'Connect nahi ho paaya'); setStatus('rstatus', ICE_FAIL_TEXT, 'err'); } });
-
-    conn.on('open', () => {
-      opened = true; clearTimeout(timer);
-      const dc = conn.dataChannel;
-      dc.binaryType = 'arraybuffer';
-      setConn('connected', 'Jud gaya');
-      setStatus('rstatus', 'Sender se jud gaye. Files ki list aa rahi hai…');
-
-      $('start').onclick = () => {
-        if (started || !offered.length) return;
-        started = true; gstate = {}; zips = {}; allGot = 0; tAll = Date.now();
-        updateButton(); keepAwake(true);
-        dc.send(JSON.stringify({ t: 'start' }));
-        setConn('busy', 'Bhej raha hai');
-        setStatus('rstatus', 'Files aa rahi hain. Ye tab band mat karna.');
-        setStatus('status', '');
-      };
-
-      let lastUi = 0;
-      dc.addEventListener('message', e => {
-        const d = e.data;
-        if (typeof d === 'string') {
-          let m; try { m = JSON.parse(d); } catch (x) { return; }
-          if (m.t === 'list') {
-            if (m.first) incoming = [];
-            incoming.push(...m.groups);
-            if (m.more) return;
-            offered = incoming; started = false; finished = false; renderList();
-            setConn('connected', 'Jud gaya');
-            setStatus('rstatus', offered.length ? 'Files taiyaar hain. "Start Download" dabao.' : 'Sender files chun raha hai…');
-          }
-          else if (m.t === 'file') {
-            const gs = gstate[m.g] = gstate[m.g] || { got: 0, n: 0, t0: Date.now() };
-            gs.n++;
-            cur = { g: m.g, path: m.path, size: m.size, type: m.type, got: 0, crc: 0, parts: [], pending: [], pendingBytes: 0,
-                    zip: !!(offered[m.g] && offered[m.g].kind === 'folder') };
-          }
-          else if (m.t === 'end') { if (cur) finishFile(); }
-          else if (m.t === 'gend') { finishGroup(m.g); }
-          else if (m.t === 'done') {
-            finished = true; started = false; keepAwake(false); updateButton();
-            const t = totals(); $('total').innerHTML = totalLine(t.count, t.size);
-            setConn('connected', 'Sab bhej diya');
-            setStatus('rstatus', 'Transfer poora ho gaya.');
-            setStatus('status', '🎉 Sab kuch aa gaya! Download apne aap shuru na hua ho toh "Save" link dabao.', 'ok');
-          }
-          else if (m.t === 'busy') { setConn('error', 'Busy hai'); setStatus('rstatus', 'Sender abhi kisi aur ko file bhej raha hai. Thodi der baad try karo.', 'err'); }
-          return;
-        }
-        if (!cur) return;
-        if (cur.zip) cur.crc = crc32(cur.crc, d);
-        cur.pending.push(d); cur.pendingBytes += d.byteLength; cur.got += d.byteLength; allGot += d.byteLength;
-        if (cur.pendingBytes >= FLUSH_BYTES) { cur.parts.push(new Blob(cur.pending)); cur.pending = []; cur.pendingBytes = 0; }
-        const gs = gstate[cur.g]; gs.got += d.byteLength;
-        if (Date.now() - lastUi > 250) {
-          lastUi = Date.now();
-          const g = offered[cur.g] || { size: cur.size, count: 1, kind: 'file' };
-          $('rf' + cur.g).style.width = pct(gs.got, g.size) + '%';
-          setStatus('rs' + cur.g, (g.kind === 'folder' ? `File ${gs.n}/${g.count} • ` : '') + progressText(gs.got, g.size, gs.t0));
-          const t = totals(); $('total').innerHTML = totalLine(t.count, t.size, allGot, tAll);
-        }
-      });
-    });
-    conn.on('close', () => {
-      if (!finished) { keepAwake(false); setConn('error', 'Chala gaya'); setStatus('rstatus', 'Sender disconnect ho gaya. Sender ka page khula ho toh ye page refresh karo.', 'err'); }
-    });
+  let firstTimer = null;
+  peer.on('error', err => {
+    if (finished) return;
+    if (reconnectUntil) { conn = null; scheduleReconnect(2500); return; }   // still recovering from a drop
+    setConn('error', 'Nahi mila'); setStatus('rstatus', peerErrorText(err), 'err');
   });
+  peer.on('disconnected', () => { setTimeout(() => { if (!peer.destroyed && peer.disconnected) { try { peer.reconnect(); } catch (e) {} } }, 2000); });
+  peer.on('open', () => {
+    if (everOpened || conn) return;    // re-registered with the server after a blip: never start a second connection
+    setConn('ready', 'Dhoondh rahe hain…');
+    connect();
+    firstTimer = setTimeout(() => {
+      if (!everOpened) { setConn('error', 'Nahi mila'); setStatus('rstatus', 'Sender se connect nahi ho paaye. Code sahi hai? Sender ka page khula hai? ' + ICE_FAIL_TEXT, 'err'); }
+    }, 30000);
+  });
+
+  if (window.__P2P_TEST__) {
+    window.__p2pDrop = () => { const c = conn; if (c && c.peerConnection) c.peerConnection.close(); lost(c); };
+    // network vanishes silently: stop listening, sender is NOT told
+    window.__p2pSilentDrop = () => { conn = null; dc = null; reconnectUntil = Date.now() + RECONNECT_FOR; scheduleReconnect(500); };
+  }
 }
 
 if (MODE === 'send') initSender(); else initReceiver();
@@ -1760,7 +1950,7 @@ if conversion_type == P2P_TOOL:
         st.info("Kaise bhejein: (1) Files ya folder chuno, (2) code ya link receiver ko bhejo, (3) receiver 'Start' dabayega "
                 "aur file seedha uske paas pahunch jaayegi. Transfer poora hone tak ye page khula rakho aur upar ka option mat badlo.",
                 icon="💡")
-        components.html(build_p2p_html("send", st.session_state.p2p_code), height=820, scrolling=True)
+        show_html_component(build_p2p_html("send", st.session_state.p2p_code), height=820)
         if st.button("🔄 New Code"):
             st.session_state.p2p_code = new_p2p_code()
             st.rerun()
@@ -1770,7 +1960,7 @@ if conversion_type == P2P_TOOL:
         if len(code) == 6:
             st.info("Sender ka page khula hona chahiye. Connect hone par files ki list dikhegi, phir 'Start Download' dabao. "
                     "Transfer poora hone tak ye page khula rakho.")
-            components.html(build_p2p_html("receive", code), height=660, scrolling=True)
+            show_html_component(build_p2p_html("receive", code), height=660)
         elif code:
             st.warning("Code poore 6 akshar ka hona chahiye.")
 
@@ -1781,10 +1971,13 @@ if conversion_type == P2P_TOOL:
             "ZIP par right-click → Extract karke folder wapas mil jaayega.\n"
             "- Folder chunna laptop/desktop browser par chalta hai. Mobile par 'Files chuno' use karo.\n"
             "- Badi files (kai GB) ke liye **Chrome ya Edge, laptop/desktop par** sabse achha chalta hai.\n"
-            "- Speed dono taraf ke internet par depend karti hai. Ek hi WiFi par ho toh bahut tez chalti hai.\n"
+            "- **Speed:** file utni hi tez jaati hai jitna bhejne wale ka internet *upload* kar sake. "
+            "Sabse tez tarika: dono devices **ek hi WiFi** par ho, ya ek device ka **hotspot** on karke doosre ko usse jodo. "
+            "Tab file internet se nahi, seedha jaati hai. App upar dikhata hai ki file kis raste se ja rahi hai.\n"
             "- Connect na ho toh: dono page refresh karo, naya code banao, ya network badal kar dekho "
             "(kuch office/college WiFi aur kuch mobile networks direct connection rok dete hain).\n"
-            "- Beech mein connection toote toh transfer dobara Start karna padega."
+            "- Beech mein net toote toh **transfer apne aap wahin se aage chalta hai**, zero se nahi. "
+            "Bas dono page khule rakho (3 minute tak dobara judne ki koshish hoti hai)."
         )
 
 elif conversion_type == CLOUD_TOOL:
@@ -1832,7 +2025,7 @@ elif conversion_type == CLOUD_TOOL:
         if st.session_state.get("transfer_slots"):
             st.info("💡 Upload ke dauran is tab ko band mat karna aur sidebar mein tool mat badalna. "
                     "Link milne ke baad aap use WhatsApp, email kahin bhi bhej sakte ho.")
-            components.html(build_transfer_html(st.session_state.transfer_slots), height=720, scrolling=True)
+            show_html_component(build_transfer_html(st.session_state.transfer_slots), height=720)
 
             if st.button("🔄 New Transfer"):
                 for k in ("transfer_id", "transfer_slots", "transfer_slots_key"):
