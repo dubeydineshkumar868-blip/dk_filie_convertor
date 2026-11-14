@@ -332,8 +332,14 @@ st.markdown("""
     }
     
     /* File uploader drop area */
+    [data-testid="stFileUploaderDropzone"],
     [data-testid="stFileUploadDropzone"] {
-        background-color: rgba(139, 92, 246, 0.1) !important;
+        background-color: #1e293b !important;   /* dark, so the white text inside is readable in light theme too */
+        border: 1px solid rgba(167, 139, 250, 0.45) !important;
+    }
+    [data-testid="stFileUploaderDropzoneInstructions"],
+    [data-testid="stFileUploaderDropzoneInstructions"] * {
+        color: #cbd5e1 !important;
     }
     
     /* File uploader dialog (browse files) */
