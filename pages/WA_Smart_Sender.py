@@ -1,8 +1,9 @@
 """
-WA Smart Sender — Download + Buy Premium page (DK File Converter ka naya page)
+WA Smart Sender — Download + Buy Premium page (English / हिंदी)
 
 Streamlit "pages/" folder ki har file apne aap sidebar me naya page ban jati hai.
 Sirf neeche ka SETTINGS hissa apni details se badlo.
+Page ka saara text neeche TEXT dictionary me hai ("en" = English, "hi" = Hindi).
 """
 import os
 import io
@@ -15,14 +16,149 @@ UPI_ID = "9250300240@ybl"            # apna UPI ID (GPay / PhonePe / Paytm)
 PAYEE_NAME = "DK Tools"              # UPI me dikhne wala naam
 WHATSAPP_NUMBER = "919250300240"     # apna WhatsApp number, 91 ke saath, bina + ke
 
-PLANS = {                            # naam: (price ₹, din)  — 0 din = lifetime
-    "1 Mahina": (199, 30),
-    "1 Saal": (999, 365),
-    "Lifetime": (1999, 0),
+PLANS = {                            # plan: (price ₹, din)  — 0 din = lifetime
+    "month": (199, 30),
+    "year": (999, 365),
+    "lifetime": (1999, 0),
 }
-ZIP_FILE = "wa-smart-sender.zip"   # ye zip repo me upload karo (main folder ya downloads/ folder)
+ZIP_FILE = "wa-smart-sender.zip"     # zip repo me (main folder / pages / downloads) kahin bhi
 VERSION = "1.1.0"
 # ===================================================================================
+
+TEXT = {
+    "en": {
+        "tagline": "Send personalised WhatsApp Web messages with natural, human-like timing",
+        "badge": "Chrome Extension • v{v} • Free + Premium ⭐",
+        "features": "✨ Features",
+        "feature_list": [
+            ("⏱️ Human-like timing", "A different random gap after every message, with automatic breaks between batches."),
+            ("✍️ Personalised messages", "Use variables such as {{name}} and {{city}}. Premium adds spintax: {Hi|Hello}."),
+            ("📊 Live progress", "See sent and failed counts, a countdown to the next message, and a CSV report."),
+            ("🛡️ Safety limits", "Daily limit, working hours, an opt-out line and a do-not-send list."),
+        ],
+        "download": "📥 Free Download",
+        "download_btn": "⬇️ Download WA Smart Sender (.zip)",
+        "download_note": "The Free plan works right after installation. For Premium, get a licence key below.",
+        "download_missing": "The download is not available yet. Please check back soon.",
+        "install_title": "⚙️ How to install (5 minutes)",
+        "install_steps": """
+1. **Extract** the zip into a **new folder**.
+2. Open Chrome and go to `chrome://extensions`.
+3. Turn on **Developer mode** (top-right corner).
+4. Click **Load unpacked** and select the folder **that directly contains `manifest.json`**.
+   *(If there is another folder inside, select the inner one.)*
+5. Click the 🧩 puzzle icon and **pin** the extension.
+6. Open `web.whatsapp.com`, scan the QR code, then click the extension icon to start. ✅
+""",
+        "compare": "⭐ Free vs Premium",
+        "rows": [
+            ("Messages per day", "50", "300"),
+            ("Contacts per campaign", "100", "5,000"),
+            ("Random gaps & batch breaks", "✔ Safe preset", "✔ Customisable"),
+            ("{{name}} variables", "✔", "✔"),
+            ("Spintax {Hi|Hello}", "✖", "✔"),
+            ("CSV import", "✖", "✔"),
+            ("Working hours", "✖", "✔"),
+            ("Typing simulation", "✖", "✔"),
+            ("Report export", "✖", "✔"),
+        ],
+        "plan_names": {"month": "1 Month", "year": "1 Year", "lifetime": "Lifetime"},
+        "days": "{d} days",
+        "lifetime_sub": "Lifetime ♾ • one-time payment",
+        "popular": "⭐ Most popular",
+        "buy": "💳 How to get Premium",
+        "choose_plan": "Choose a plan:",
+        "qr_caption": "Scan to pay ₹{p}",
+        "qr_missing": "Add `qrcode` to requirements.txt to show the QR code.",
+        "step1": "**Step 1:** Pay ₹{p} using any UPI app.",
+        "pay_btn": "📱 Pay with a UPI app (mobile)",
+        "step2": "**Step 2:** Send the payment screenshot on WhatsApp.",
+        "wa_btn": "💬 Send screenshot on WhatsApp",
+        "wa_text": "Hello! I have paid for WA Smart Sender Premium ({plan} - ₹{p}). I am sending the payment screenshot. My name: ",
+        "step3": "**Step 3:** You will receive a licence key. Open the extension's **Plan** tab and click **Activate**. ⭐",
+        "faq": "❓ Frequently asked questions",
+        "faq_list": [
+            ("Will my number be safe from blocking?",
+             "The extension uses human-like gaps, daily limits and breaks, which **reduce** the risk — "
+             "but **no tool can guarantee** that a number will never be blocked. WhatsApp blocks numbers "
+             "mostly when people **report or block** the sender. Message only people who know you "
+             "(customers, enquiries), and start slowly with a new number."),
+            ("On how many computers does one key work?",
+             "One key works on **one computer**. If you change your computer, message us on WhatsApp and we will reset it."),
+            ("What happens when my plan ends?",
+             "The extension switches back to the **Free plan** automatically. Nothing is deleted. Renew to get Premium back."),
+            ("Does it work on mobile?",
+             "No. It is an extension for the **Chrome browser on a computer**, used with WhatsApp Web."),
+        ],
+        "footer": "Made with ❤️ by DK Tools • WA Smart Sender",
+    },
+    "hi": {
+        "tagline": "व्हाट्सऐप वेब पर अपने संदेश भेजें — इंसान जैसे स्वाभाविक समय-अंतराल के साथ",
+        "badge": "क्रोम एक्सटेंशन • v{v} • फ्री + प्रीमियम ⭐",
+        "features": "✨ विशेषताएँ",
+        "feature_list": [
+            ("⏱️ इंसान जैसा समय-अंतराल", "हर संदेश के बाद अलग-अलग समय का अंतर, और कुछ संदेशों के बाद अपने-आप विराम।"),
+            ("✍️ व्यक्तिगत संदेश", "{{name}}, {{city}} जैसे वेरिएबल लगाएँ। प्रीमियम में स्पिनटैक्स भी: {Hi|Hello}।"),
+            ("📊 लाइव प्रगति", "भेजे गए और असफल संदेशों की गिनती, अगले संदेश की उलटी गिनती, और CSV रिपोर्ट।"),
+            ("🛡️ सुरक्षा सीमाएँ", "दैनिक सीमा, कार्य-समय, ऑप्ट-आउट पंक्ति और ‘न भेजें’ सूची।"),
+        ],
+        "download": "📥 मुफ़्त डाउनलोड",
+        "download_btn": "⬇️ WA Smart Sender डाउनलोड करें (.zip)",
+        "download_note": "इंस्टॉल करते ही फ्री प्लान चालू हो जाता है। प्रीमियम के लिए नीचे से लाइसेंस कोड लें।",
+        "download_missing": "डाउनलोड अभी उपलब्ध नहीं है। कृपया थोड़ी देर बाद देखें।",
+        "install_title": "⚙️ इंस्टॉल कैसे करें (5 मिनट)",
+        "install_steps": """
+1. ज़िप फ़ाइल को एक **नए फ़ोल्डर** में **एक्सट्रैक्ट** करें।
+2. क्रोम में `chrome://extensions` खोलें।
+3. ऊपर दाईं ओर **Developer mode** चालू करें।
+4. **Load unpacked** दबाएँ और वह फ़ोल्डर चुनें **जिसमें सीधे `manifest.json` दिखे**।
+   *(अगर फ़ोल्डर के अंदर एक और फ़ोल्डर है, तो अंदर वाला चुनें।)*
+5. 🧩 पज़ल आइकन से एक्सटेंशन को **पिन** करें।
+6. `web.whatsapp.com` खोलें, QR कोड स्कैन करें, फिर एक्सटेंशन आइकन दबाकर शुरू करें। ✅
+""",
+        "compare": "⭐ फ्री बनाम प्रीमियम",
+        "rows": [
+            ("प्रतिदिन संदेश", "50", "300"),
+            ("प्रति अभियान संपर्क", "100", "5,000"),
+            ("रैंडम अंतराल और विराम", "✔ सुरक्षित तय सेटिंग", "✔ अपनी सेटिंग"),
+            ("{{name}} वेरिएबल", "✔", "✔"),
+            ("स्पिनटैक्स {Hi|Hello}", "✖", "✔"),
+            ("CSV इम्पोर्ट", "✖", "✔"),
+            ("कार्य-समय", "✖", "✔"),
+            ("टाइपिंग सिमुलेशन", "✖", "✔"),
+            ("रिपोर्ट एक्सपोर्ट", "✖", "✔"),
+        ],
+        "plan_names": {"month": "1 महीना", "year": "1 साल", "lifetime": "आजीवन"},
+        "days": "{d} दिन",
+        "lifetime_sub": "आजीवन ♾ • एक बार भुगतान",
+        "popular": "⭐ सबसे लोकप्रिय",
+        "buy": "💳 प्रीमियम कैसे लें",
+        "choose_plan": "प्लान चुनें:",
+        "qr_caption": "₹{p} भुगतान के लिए स्कैन करें",
+        "qr_missing": "QR कोड दिखाने के लिए requirements.txt में `qrcode` जोड़ें।",
+        "step1": "**चरण 1:** किसी भी UPI ऐप से ₹{p} का भुगतान करें।",
+        "pay_btn": "📱 UPI ऐप से भुगतान करें (मोबाइल)",
+        "step2": "**चरण 2:** भुगतान का स्क्रीनशॉट व्हाट्सऐप पर भेजें।",
+        "wa_btn": "💬 व्हाट्सऐप पर स्क्रीनशॉट भेजें",
+        "wa_text": "नमस्ते! मैंने WA Smart Sender प्रीमियम ({plan} - ₹{p}) का भुगतान कर दिया है। भुगतान का स्क्रीनशॉट भेज रहा/रही हूँ। मेरा नाम: ",
+        "step3": "**चरण 3:** आपको एक लाइसेंस कोड मिलेगा। एक्सटेंशन के **Plan** टैब में उसे डालकर **Activate** दबाएँ। ⭐",
+        "faq": "❓ अक्सर पूछे जाने वाले प्रश्न",
+        "faq_list": [
+            ("क्या मेरा नंबर ब्लॉक होने से सुरक्षित रहेगा?",
+             "एक्सटेंशन इंसान जैसा अंतराल, दैनिक सीमा और विराम रखता है, जिससे जोखिम **कम** होता है — "
+             "लेकिन **कोई भी टूल पूरी गारंटी नहीं दे सकता** कि नंबर कभी ब्लॉक नहीं होगा। व्हाट्सऐप ज़्यादातर तब "
+             "ब्लॉक करता है जब लोग भेजने वाले की **रिपोर्ट या ब्लॉक** करते हैं। केवल उन्हीं लोगों को संदेश भेजें "
+             "जो आपको जानते हैं (ग्राहक, पूछताछ करने वाले), और नए नंबर से धीरे-धीरे शुरुआत करें।"),
+            ("एक लाइसेंस कोड कितने कंप्यूटर पर चलेगा?",
+             "एक कोड **एक कंप्यूटर** पर चलता है। कंप्यूटर बदलने पर हमें व्हाट्सऐप करें, हम उसे रीसेट कर देंगे।"),
+            ("प्लान ख़त्म होने पर क्या होगा?",
+             "एक्सटेंशन अपने-आप **फ्री प्लान** पर आ जाएगा। कुछ भी डिलीट नहीं होता। रिन्यू करते ही प्रीमियम वापस मिल जाएगा।"),
+            ("क्या यह मोबाइल पर चलता है?",
+             "नहीं। यह **कंप्यूटर के क्रोम ब्राउज़र** का एक्सटेंशन है, जो व्हाट्सऐप वेब के साथ काम करता है।"),
+        ],
+        "footer": "DK Tools द्वारा ❤️ के साथ बनाया गया • WA Smart Sender",
+    },
+}
 
 st.set_page_config(page_title="WA Smart Sender | DK Tools", page_icon="💬", layout="centered")
 
@@ -82,82 +218,71 @@ div, p, span, li { color: #e2e8f0; }
 </style>
 """, unsafe_allow_html=True)
 
+# ---------- Language switch ----------
+_, lang_col = st.columns([3, 1.2])
+with lang_col:
+    lang_label = st.radio("Language / भाषा", ["English", "हिंदी"], horizontal=True,
+                          key="wa_lang", label_visibility="collapsed")
+L = TEXT["hi" if lang_label == "हिंदी" else "en"]
+
 # ---------- Header ----------
 st.markdown(f"""
 <div class="wa-header">
   <h1>💬 WA Smart Sender</h1>
-  <p>WhatsApp Web par custom messages, insaan jaise random time gap ke saath</p>
-  <span class="wa-badge">Chrome Extension • v{VERSION} • Free + Premium ⭐</span>
+  <p>{L["tagline"]}</p>
+  <span class="wa-badge">{L["badge"].format(v=VERSION)}</span>
 </div>
 """, unsafe_allow_html=True)
 
 # ---------- Features ----------
-st.markdown("### ✨ Features")
-features = [
-    ("⏱️ Human-like gap", "Har message ke baad alag random time, beech me batch breaks."),
-    ("✍️ Custom message", "{{name}}, {{city}} jaise variables; Premium me {Hi|Hello} spintax."),
-    ("📊 Live progress", "Sent / Failed count, countdown, aur CSV report."),
-    ("🛡️ Safety limits", "Daily limit, working hours, opt-out line, do-not-send list."),
-]
+st.markdown(f"### {L['features']}")
+features = L["feature_list"]
 for i in range(0, len(features), 2):
     cols = st.columns(2)
     for col, (title, desc) in zip(cols, features[i:i + 2]):
         col.markdown(f'<div class="wa-card"><h4>{title}</h4><p>{desc}</p></div>', unsafe_allow_html=True)
 
 # ---------- Download ----------
-st.markdown("### 📥 Free Download")
-ZIP_PATH = next((p for p in (ZIP_FILE, os.path.join("pages", ZIP_FILE), os.path.join("downloads", ZIP_FILE)) if os.path.exists(p)), None)
+st.markdown(f"### {L['download']}")
+ZIP_PATH = next((p for p in (ZIP_FILE, os.path.join("pages", ZIP_FILE), os.path.join("downloads", ZIP_FILE))
+                 if os.path.exists(p)), None)
 if ZIP_PATH:
     with open(ZIP_PATH, "rb") as f:
-        st.download_button("⬇️ Download WA Smart Sender (.zip)", f.read(),
-                           file_name="wa-smart-sender.zip", mime="application/zip")
-    st.caption("Free plan download karte hi chalu. Premium ke liye neeche license key lein.")
+        st.download_button(L["download_btn"], f.read(), file_name="wa-smart-sender.zip", mime="application/zip")
+    st.caption(L["download_note"])
 else:
-    st.warning("Download abhi taiyar nahi hai. (Owner: GitHub repo me `wa-smart-sender.zip` upload karein.)")
+    st.warning(L["download_missing"])
 
-with st.expander("⚙️ Install kaise karein (5 minute)", expanded=True):
-    st.markdown("""
-1. Zip ko kisi **naye folder** me **Extract** karein.
-2. Chrome me kholein: `chrome://extensions`
-3. Upar right me **Developer mode** ON karein.
-4. **Load unpacked** dabayein → woh folder chunein **jisme `manifest.json` seedha dikhe**.
-   *(Agar folder ke andar ek aur folder ho, to andar wala chunein.)*
-5. 🧩 puzzle icon se extension **pin** karein.
-6. `web.whatsapp.com` kholein, QR scan karein → extension icon dabayein → shuru! ✅
-""")
+with st.expander(L["install_title"], expanded=True):
+    st.markdown(L["install_steps"])
 
 # ---------- Plans ----------
-st.markdown("### ⭐ Free vs Premium")
-st.markdown("""
+st.markdown(f"### {L['compare']}")
+rows_html = "".join(f"<tr><td>{a}</td><td>{b}</td><td>{c}</td></tr>" for a, b, c in L["rows"])
+st.markdown(f"""
 <table class="wa-table">
 <tr><th></th><th>Free</th><th class="gold">Premium ⭐</th></tr>
-<tr><td>Messages / day</td><td>50</td><td>300</td></tr>
-<tr><td>Contacts / campaign</td><td>100</td><td>5,000</td></tr>
-<tr><td>Random gap & batch breaks</td><td>✔ Safe preset</td><td>✔ Custom</td></tr>
-<tr><td>{{name}} variables</td><td>✔</td><td>✔</td></tr>
-<tr><td>Spintax {Hi|Hello}</td><td>✖</td><td>✔</td></tr>
-<tr><td>CSV import</td><td>✖</td><td>✔</td></tr>
-<tr><td>Working hours</td><td>✖</td><td>✔</td></tr>
-<tr><td>Typing simulation</td><td>✖</td><td>✔</td></tr>
-<tr><td>Report export</td><td>✖</td><td>✔</td></tr>
+{rows_html}
 </table>
 """, unsafe_allow_html=True)
 
-plan_names = list(PLANS.keys())
-cols = st.columns(len(plan_names))
-for idx, (col, name) in enumerate(zip(cols, plan_names)):
-    price, days = PLANS[name]
-    sub = "Lifetime ♾ • ek baar" if days == 0 else f"{days} din"
+plan_ids = list(PLANS.keys())
+cols = st.columns(len(plan_ids))
+for idx, (col, pid) in enumerate(zip(cols, plan_ids)):
+    price, days = PLANS[pid]
+    sub = L["lifetime_sub"] if days == 0 else L["days"].format(d=days)
     best = " best" if idx == 1 else ""
-    tag = "<div class='sub gold'>⭐ Sabse popular</div>" if best else "<div class='sub'>&nbsp;</div>"
-    col.markdown(f"""<div class="wa-card plan{best}">{tag}<h4>{name}</h4>
+    tag = f"<div class='sub gold'>{L['popular']}</div>" if best else "<div class='sub'>&nbsp;</div>"
+    col.markdown(f"""<div class="wa-card plan{best}">{tag}<h4>{L['plan_names'][pid]}</h4>
         <div class="price">₹{price}</div><div class="sub">{sub}</div></div>""", unsafe_allow_html=True)
 
 # ---------- Buy ----------
-st.markdown("### 💳 Premium kaise lein")
-choice = st.radio("Plan chunein:", plan_names, index=1, horizontal=True)
+st.markdown(f"### {L['buy']}")
+choice = st.radio(L["choose_plan"], plan_ids, index=1, horizontal=True,
+                  format_func=lambda pid: L["plan_names"][pid], key="wa_plan")
 price, days = PLANS[choice]
-note = f"WA Smart Sender {choice}"
+plan_name = L["plan_names"][choice]
+note = f"WA Smart Sender {TEXT['en']['plan_names'][choice]}"
 upi_link = (f"upi://pay?pa={quote(UPI_ID)}&pn={quote(PAYEE_NAME)}"
             f"&am={price}&cu=INR&tn={quote(note)}")
 
@@ -168,38 +293,23 @@ with left:
         img = qrcode.make(upi_link)
         buf = io.BytesIO()
         img.save(buf, format="PNG")
-        st.image(buf.getvalue(), caption=f"Scan karke ₹{price} pay karein", use_container_width=True)
+        st.image(buf.getvalue(), caption=L["qr_caption"].format(p=price), use_container_width=True)
     except Exception:
-        st.info("QR ke liye requirements.txt me `qrcode` jodein.")
+        st.info(L["qr_missing"])
 with right:
-    st.markdown(f"**Step 1:** ₹{price} pay karein (koi bhi UPI app)")
+    st.markdown(L["step1"].format(p=price))
     st.markdown(f'<div class="upi-box">{UPI_ID}</div>', unsafe_allow_html=True)
-    st.markdown(f'<a class="pay-btn" href="{upi_link}">📱 UPI App se Pay karein (mobile)</a>',
+    st.markdown(f'<a class="pay-btn" href="{upi_link}">{L["pay_btn"]}</a>', unsafe_allow_html=True)
+    st.markdown(L["step2"])
+    wa_link = f"https://wa.me/{WHATSAPP_NUMBER}?text={quote(L['wa_text'].format(plan=plan_name, p=price))}"
+    st.markdown(f'<a class="pay-btn wa-btn" href="{wa_link}" target="_blank">{L["wa_btn"]}</a>',
                 unsafe_allow_html=True)
-    st.markdown("**Step 2:** Payment ka screenshot WhatsApp par bhejein")
-    wa_text = (f"Namaste! Maine WA Smart Sender Premium ({choice} - ₹{price}) ke liye "
-               f"payment kar diya hai. Screenshot bhej raha/rahi hoon. Mera naam: ")
-    wa_link = f"https://wa.me/{WHATSAPP_NUMBER}?text={quote(wa_text)}"
-    st.markdown(f'<a class="pay-btn wa-btn" href="{wa_link}" target="_blank">💬 WhatsApp par screenshot bhejein</a>',
-                unsafe_allow_html=True)
-    st.markdown("**Step 3:** Aapko License Key mil jayegi → extension ke **Plan** tab me Activate karein ⭐")
+    st.markdown(L["step3"])
 
-# ---------- Honest note + FAQ ----------
-st.markdown("### ❓ Aksar puchhe jaane wale sawal")
-with st.expander("Kya mera number block nahi hoga?"):
-    st.markdown("""
-Extension insaan jaisa time gap, daily limit aur breaks rakhta hai, jo risk ko **kam** karta hai —
-lekin **koi bhi tool 100% guarantee nahi de sakta**. WhatsApp sabse zyada tab block karta hai jab log
-aapko **report/block** karte hain. Isliye sirf unhi logon ko message bhejein jo aapko jaante hain
-(customers, enquiry wale), aur naye number se dheere-dheere shuru karein.
-""")
-with st.expander("Key kitne computer par chalegi?"):
-    st.markdown("Ek key **1 computer** par chalti hai. Naya computer liya ho to WhatsApp par batayein, hum reset kar denge.")
-with st.expander("Plan khatam hone par kya hoga?"):
-    st.markdown("Extension apne aap **Free plan** par aa jayega — kuch delete nahi hota. Renew karte hi Premium wapas.")
-with st.expander("Mobile par chalega?"):
-    st.markdown("Nahi, ye **computer ke Chrome browser** ka extension hai (WhatsApp Web ke saath).")
+# ---------- FAQ ----------
+st.markdown(f"### {L['faq']}")
+for q, a in L["faq_list"]:
+    with st.expander(q):
+        st.markdown(a)
 
-st.markdown("""
-<div class="footer"><p>Created with ❤️ by DK Tools • WA Smart Sender</p></div>
-""", unsafe_allow_html=True)
+st.markdown(f'<div class="footer"><p>{L["footer"]}</p></div>', unsafe_allow_html=True)
