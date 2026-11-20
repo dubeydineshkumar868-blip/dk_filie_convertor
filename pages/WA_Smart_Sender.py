@@ -11,9 +11,9 @@ from urllib.parse import quote
 import streamlit as st
 
 # ======================= SETTINGS (yahan apni details daalo) =======================
-UPI_ID = "yourname@upi"            # apna UPI ID (GPay / PhonePe / Paytm)
+UPI_ID = "9250300240@ybl"            # apna UPI ID (GPay / PhonePe / Paytm)
 PAYEE_NAME = "DK Tools"              # UPI me dikhne wala naam
-WHATSAPP_NUMBER = "919999999999"     # apna WhatsApp number, 91 ke saath, bina + ke
+WHATSAPP_NUMBER = "919250300240"     # apna WhatsApp number, 91 ke saath, bina + ke
 
 PLANS = {                            # naam: (price ₹, din)  — 0 din = lifetime
     "1 Mahina": (199, 30),
