@@ -106,7 +106,7 @@ for i in range(0, len(features), 2):
 
 # ---------- Download ----------
 st.markdown("### 📥 Free Download")
-ZIP_PATH = next((p for p in (ZIP_FILE, os.path.join("downloads", ZIP_FILE)) if os.path.exists(p)), None)
+ZIP_PATH = next((p for p in (ZIP_FILE, os.path.join("pages", ZIP_FILE), os.path.join("downloads", ZIP_FILE)) if os.path.exists(p)), None)
 if ZIP_PATH:
     with open(ZIP_PATH, "rb") as f:
         st.download_button("⬇️ Download WA Smart Sender (.zip)", f.read(),
