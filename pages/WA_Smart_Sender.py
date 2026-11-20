@@ -22,7 +22,7 @@ PLANS = {                            # plan: (price ₹, din)  — 0 din = lifet
     "lifetime": (1999, 0),
 }
 ZIP_FILE = "wa-smart-sender.zip"     # zip repo me (main folder / pages / downloads) kahin bhi
-VERSION = "1.1.0"
+VERSION = "1.3.0"
 # ===================================================================================
 
 TEXT = {
@@ -35,6 +35,8 @@ TEXT = {
             ("✍️ Personalised messages", "Use variables such as {{name}} and {{city}}. Premium adds spintax: {Hi|Hello}."),
             ("📊 Live progress", "See sent and failed counts, a countdown to the next message, and a CSV report."),
             ("🛡️ Safety limits", "Daily limit, working hours, an opt-out line and a do-not-send list."),
+            ("📝 Message templates", "Save your messages and reuse them. Add names, emojis, ready lines and links in one click."),
+            ("📎 Images & PDFs (Premium)", "Send one poster to everyone, or a personal letter/PDF to each contact."),
         ],
         "download": "📥 Free Download",
         "download_btn": "⬇️ Download WA Smart Sender (.zip)",
@@ -61,6 +63,9 @@ TEXT = {
             ("Working hours", "✖", "✔"),
             ("Typing simulation", "✖", "✔"),
             ("Report export", "✖", "✔"),
+            ("Message templates", "5", "50"),
+            ("Image / PDF attachments", "✖", "✔"),
+            ("Personal file for each contact", "✖", "✔"),
         ],
         "plan_names": {"month": "1 Month", "year": "1 Year", "lifetime": "Lifetime"},
         "days": "{d} days",
@@ -101,6 +106,8 @@ TEXT = {
             ("✍️ व्यक्तिगत संदेश", "{{name}}, {{city}} जैसे वेरिएबल लगाएँ। प्रीमियम में स्पिनटैक्स भी: {Hi|Hello}।"),
             ("📊 लाइव प्रगति", "भेजे गए और असफल संदेशों की गिनती, अगले संदेश की उलटी गिनती, और CSV रिपोर्ट।"),
             ("🛡️ सुरक्षा सीमाएँ", "दैनिक सीमा, कार्य-समय, ऑप्ट-आउट पंक्ति और ‘न भेजें’ सूची।"),
+            ("📝 संदेश टेम्पलेट", "अपने संदेश सेव करें और दोबारा इस्तेमाल करें। नाम, इमोजी, तैयार पंक्तियाँ और लिंक एक क्लिक में जोड़ें।"),
+            ("📎 इमेज और PDF (प्रीमियम)", "सभी को एक जैसा पोस्टर भेजें, या हर व्यक्ति को उसका अलग पत्र/PDF।"),
         ],
         "download": "📥 मुफ़्त डाउनलोड",
         "download_btn": "⬇️ WA Smart Sender डाउनलोड करें (.zip)",
@@ -127,6 +134,9 @@ TEXT = {
             ("कार्य-समय", "✖", "✔"),
             ("टाइपिंग सिमुलेशन", "✖", "✔"),
             ("रिपोर्ट एक्सपोर्ट", "✖", "✔"),
+            ("संदेश टेम्पलेट", "5", "50"),
+            ("इमेज / PDF भेजना", "✖", "✔"),
+            ("हर व्यक्ति को उसकी अलग फ़ाइल", "✖", "✔"),
         ],
         "plan_names": {"month": "1 महीना", "year": "1 साल", "lifetime": "आजीवन"},
         "days": "{d} दिन",
